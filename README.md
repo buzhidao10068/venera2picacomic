@@ -95,6 +95,22 @@ Venera 的 hashCode 是 Dart VM 的 30 位字符串哈希（one-at-a-time，遍�
   按漫画一行也不一样。
 - 若干列在读取时会被强转 `String` / `int`，为 NULL 会抛异常，需要填默认值。
 
+## 声明
+
+本项目是非官方的第三方工具，与 [Venera](https://github.com/venera-app/venera)、
+[PicaComic](https://github.com/ccbkv/PicaComic) 均无关联，也未获得任何一方背书。
+它不提供、不托管、不分发任何漫画内容，也不访问任何漫画站点——全部工作是在本机
+读取你自己导出的文件、写出另一个格式的文件。README 中出现的来源名称仅用于说明
+两个 App 的内部编号如何对应。
+
+导入会写入 PicaComic 的收藏库与历史库。**操作前请先在 PicaComic 里导出一份备份**。
+格式是照下文所列源码逆推的，上游改动可能使转换失效。
+
+**注意保护自己的数据。** `.venera` / `.picadata` 是你完整书库的记录——收藏、
+阅读历史、封面地址。Venera 导出的 `appdata.json` 还**明文**保存着 WebDAV 的账号
+与密码，`cookie.db` 里是各站点的登录态。提交 issue 时不要附带这些文件，需要复现
+问题请自行删减成最小样本。本仓库的 `.gitignore` 已排除这两类文件。
+
 ## 兼容性
 
 对照 [ccbkv/PicaComic](https://github.com/ccbkv/PicaComic) `master` 的
@@ -103,3 +119,7 @@ Venera 的 hashCode 是 Dart VM 的 30 位字符串哈希（one-at-a-time，遍�
 `lib/foundation/def.dart`、`lib/base.dart` 实现。上游
 [wgh136/PicaComic](https://github.com/wgh136/PicaComic) 的导入流程基本相同，
 多出的空表和多余列都会被按列名读取的合并逻辑忽略。
+
+## 许可证
+
+[MIT](LICENSE)
