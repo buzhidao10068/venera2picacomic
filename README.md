@@ -1,4 +1,4 @@
-# venera2picadata
+# venera2picacomic
 
 把 [Venera](https://github.com/venera-app/venera) 导出的 `.venera` 文件转成
 [PicaComic](https://github.com/ccbkv/PicaComic) 能导入的 `.picadata`，迁移**收藏夹**和**阅读历史**。
@@ -14,7 +14,7 @@
 ## 用法
 
 ```bash
-python venera2picadata.py in.venera out.picadata [已有的PicaComic导出.picadata]
+python venera2picacomic.py in.venera out.picadata [已有的PicaComic导出.picadata]
 ```
 
 只需要 Python 3（标准库 `sqlite3` + `zipfile`），无第三方依赖。
