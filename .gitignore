@@ -1,0 +1,6 @@
+# personal exports -- never commit these, they contain your own library
+*.venera
+*.picadata
+
+__pycache__/
+*.pyc
