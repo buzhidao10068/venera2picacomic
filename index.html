@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="把 Venera 导出的 .venera 转成 PicaComic 能导入的 .picadata。转换全部在浏览器内完成，文件不会上传。">
+<title>venera2picacomic</title>
+<!-- inline, so the page issues no request of its own -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2314161d'/%3E%3Cpath d='M3 5h3l0 6' stroke='%23d9a441' stroke-width='1.6' fill='none'/%3E%3Cpath d='M6 11l2-6' stroke='%23d9a441' stroke-width='1.6' fill='none'/%3E%3Ccircle cx='11.5' cy='8' r='2.6' stroke='%233fb8a6' stroke-width='1.6' fill='none'/%3E%3C/svg%3E">
+<style>
+:root{
+  --ink:#14161d; --ink-2:#1b1e28; --ink-3:#232733; --line:#2c313e;
+  --paper:#e9e7e1; --dim:#a4a8b4; --faint:#6d7280;
+  --venera:#d9a441; --pica:#3fb8a6; --alarm:#e03e5c;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ink); color:var(--paper); font-family:var(--sans);
+  font-size:15px; line-height:1.75; letter-spacing:.01em;
+  -webkit-font-smoothing:antialiased;
+}
+/* ambient: warm at the top, cool at the bottom -- the conversion, very quietly */
+body::before{
+  content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:
+    radial-gradient(60rem 40rem at 12% -8%, rgba(217,164,65,.055), transparent 70%),
+    radial-gradient(60rem 40rem at 88% 108%, rgba(63,184,166,.05), transparent 70%);
+}
+.wrap{max-width:60rem; margin:0 auto; padding:0 1.5rem 6rem}
+a{color:var(--pica); text-decoration:none; border-bottom:1px solid rgba(63,184,166,.3)}
+a:hover{border-bottom-color:var(--pica)}
+:focus-visible{outline:2px solid var(--pica); outline-offset:3px; border-radius:2px}
+
+/* ---- top bar ---- */
+.bar{
+  display:flex; align-items:baseline; gap:1rem; flex-wrap:wrap;
+  padding:1.5rem 0 1.25rem; border-bottom:1px solid var(--line); margin-bottom:4.5rem;
+}
+.bar b{font-family:var(--mono); font-weight:600; font-size:.8125rem; letter-spacing:.02em}
+.bar span{font-size:.75rem; color:var(--faint); margin-left:auto}
+
+/* ---- hero: the transform itself ---- */
+.hero{margin-bottom:3.5rem}
+.transform{
+  font-family:var(--mono); font-weight:700; font-size:clamp(1.75rem,6.4vw,3.5rem);
+  letter-spacing:-.035em; line-height:1.1; display:flex; align-items:center;
+  gap:clamp(.5rem,2.5vw,1.5rem); flex-wrap:wrap; margin:0 0 1.75rem;
+}
+.transform .src{color:var(--venera)}
+.transform .dst{color:var(--pica)}
+.transform .arw{color:var(--faint); font-weight:400; font-size:.7em; letter-spacing:-.1em}
+.lede{max-width:46rem; margin:0; color:var(--dim)}
+.lede strong{color:var(--paper); font-weight:600}
+.lede + .lede{margin-top:.75rem}
+
+/* ---- section furniture ---- */
+section{margin-top:4rem}
+h2{
+  font-family:var(--mono); font-size:.6875rem; font-weight:600; text-transform:uppercase;
+  letter-spacing:.2em; color:var(--faint); margin:0 0 1.25rem;
+  padding-bottom:.75rem; border-bottom:1px solid var(--line);
+  display:flex; align-items:baseline; gap:1rem;
+}
+h2 em{
+  font-style:normal; letter-spacing:.05em; text-transform:none; margin-left:auto;
+  font-size:.75rem; color:var(--dim); font-variant-numeric:tabular-nums;
+}
+.note{font-size:.8125rem; color:var(--faint); line-height:1.7; margin:1rem 0 0}
+.note code{font-family:var(--mono); font-size:.9em; color:var(--dim)}
+
+/* ---- drop zone ---- */
+.drop{
+  position:relative; display:block; width:100%; border:1px dashed rgba(217,164,65,.4);
+  border-radius:4px; background:rgba(217,164,65,.028); color:inherit; font:inherit;
+  padding:3.25rem 1.5rem; text-align:center; cursor:pointer;
+  transition:border-color .15s, background .15s;
+}
+.drop:hover,.drop.over{border-color:var(--venera); background:rgba(217,164,65,.07)}
+.drop.over{border-style:solid}
+.drop b{display:block; font-family:var(--mono); font-size:.9375rem; font-weight:600; letter-spacing:-.01em}
+.drop small{display:block; margin-top:.5rem; font-size:.8125rem; color:var(--faint)}
+.drop[disabled]{cursor:progress; opacity:.55}
+.drop input{position:absolute; width:1px; height:1px; opacity:0; pointer-events:none}
+
+.adv{margin-top:1rem; font-size:.8125rem}
+.adv summary{cursor:pointer; color:var(--dim); list-style:none; display:inline-flex; gap:.5rem; align-items:center}
+.adv summary::-webkit-details-marker{display:none}
+.adv summary::before{content:"+"; font-family:var(--mono); color:var(--faint)}
+.adv[open] summary::before{content:"–"}
+.adv .body{padding:1rem 0 0 1.25rem; color:var(--faint); line-height:1.7}
+.adv label{
+  display:inline-block; margin-top:.75rem; padding:.5rem .875rem; cursor:pointer;
+  border:1px solid var(--line); border-radius:3px; font-family:var(--mono);
+  font-size:.75rem; color:var(--dim);
+}
+.adv label:hover{border-color:var(--dim); color:var(--paper)}
+.adv input[type=file]{position:absolute; width:1px; height:1px; opacity:0}
+.adv .picked{color:var(--pica); font-family:var(--mono); font-size:.75rem}
+
+/* ---- status / error ---- */
+.status{font-family:var(--mono); font-size:.8125rem; color:var(--dim); margin-top:1.25rem; min-height:1.5em}
+.status .tick{color:var(--pica)}
+.err{
+  margin-top:1.25rem; padding:1rem 1.125rem; border-left:2px solid var(--alarm);
+  background:rgba(224,62,92,.07); font-size:.875rem; line-height:1.7;
+}
+.err b{display:block; font-family:var(--mono); font-size:.8125rem; color:var(--alarm); margin-bottom:.35rem}
+[hidden]{display:none!important}
+
+/* ---- counts ---- */
+.counts{display:flex; flex-wrap:wrap; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:3px; overflow:hidden}
+.counts div{flex:1 1 8rem; background:var(--ink-2); padding:1.125rem 1.25rem}
+.counts dt{font-family:var(--mono); font-size:.625rem; text-transform:uppercase; letter-spacing:.16em; color:var(--faint); margin:0}
+.counts dd{margin:.5rem 0 0; font-family:var(--mono); font-size:1.5rem; font-weight:600; letter-spacing:-.03em; font-variant-numeric:tabular-nums}
+
+/* ---- data tables: the A -> B motif ---- */
+.scroll{overflow-x:auto; margin:0 -1.5rem; padding:0 1.5rem}
+table{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:.8125rem; font-variant-numeric:tabular-nums}
+th{
+  text-align:left; font-weight:600; font-size:.625rem; text-transform:uppercase;
+  letter-spacing:.14em; color:var(--faint); padding:0 1rem .625rem 0; white-space:nowrap;
+}
+td{padding:.4375rem 1rem .4375rem 0; border-top:1px solid rgba(44,49,62,.6); white-space:nowrap}
+th:last-child,td:last-child{padding-right:0}
+.num{text-align:right; font-variant-numeric:tabular-nums}
+.hash{color:var(--faint)}
+.key{color:var(--venera)}
+.to{color:var(--faint)}
+.val{color:var(--pica); font-weight:600}
+.split{color:var(--alarm); font-weight:600}
+.pass td{color:var(--dim)}
+td.name{white-space:normal; word-break:break-word; min-width:10rem; color:var(--paper)}
+tfoot td{border-top:1px solid var(--line); color:var(--faint); font-size:.75rem; padding-top:.75rem}
+
+/* ---- the ledger: every hazard this output has to survive ---- */
+.ledger{list-style:none; margin:0; padding:0}
+.ledger li{
+  display:grid; grid-template-columns:1.25rem 1fr; gap:0 .875rem; align-items:start;
+  padding:.6875rem 0; border-top:1px solid rgba(44,49,62,.6);
+}
+.ledger li:first-child{border-top:0}
+.ledger .mark{font-family:var(--mono); font-size:.8125rem; line-height:1.7; text-align:center}
+.ledger .ok .mark{color:var(--pica)}
+.ledger .no .mark{color:var(--alarm)}
+.ledger .claim{font-size:.875rem; line-height:1.6}
+.ledger .no .claim{color:var(--alarm)}
+.ledger .why{
+  grid-column:2; font-size:.75rem; color:var(--faint); line-height:1.65; margin-top:.1875rem;
+}
+.ledger .why code{font-family:var(--mono); color:var(--dim)}
+@media (prefers-reduced-motion:no-preference){
+  .ledger li{animation:in .32s cubic-bezier(.2,.7,.3,1) backwards}
+}
+@keyframes in{from{opacity:0; transform:translateY(.375rem)}}
+
+/* ---- replay summary ---- */
+.replay{
+  margin-top:1.5rem; padding:1.125rem 1.25rem; border:1px solid var(--line);
+  border-radius:3px; background:var(--ink-2); font-family:var(--mono); font-size:.8125rem;
+  line-height:1.9; font-variant-numeric:tabular-nums;
+}
+.replay b{color:var(--faint); font-weight:400}
+.replay .v{color:var(--paper); font-weight:600}
+.replay .head{
+  display:block; font-size:.625rem; text-transform:uppercase; letter-spacing:.16em;
+  color:var(--faint); margin-bottom:.625rem;
+}
+
+/* ---- download ---- */
+.finish{margin-top:4rem; padding-top:2.5rem; border-top:1px solid var(--line); text-align:center}
+.dl{
+  display:inline-block; font-family:var(--mono); font-size:.9375rem; font-weight:600;
+  letter-spacing:-.01em; padding:1rem 2.25rem; border-radius:3px; cursor:pointer;
+  background:var(--pica); color:#0d1417; border:1px solid var(--pica);
+  transition:filter .15s;
+}
+.dl:hover{filter:brightness(1.1)}
+.dl.blocked{background:transparent; color:var(--alarm); border-color:rgba(224,62,92,.5)}
+.after{margin:1.25rem 0 0; font-size:.8125rem; color:var(--faint); line-height:1.8}
+.after code{font-family:var(--mono); color:var(--dim)}
+.after em{font-style:normal; color:var(--venera)}
+
+/* ---- footer ---- */
+footer{
+  margin-top:6rem; padding-top:1.5rem; border-top:1px solid var(--line);
+  font-size:.75rem; color:var(--faint); line-height:1.9;
+}
+footer p{margin:0 0 .5rem}
+footer .mono{font-family:var(--mono)}
+
+@media (max-width:34rem){
+  body{font-size:14px}
+  .wrap{padding:0 1.125rem 4rem}
+  .scroll{margin:0 -1.125rem; padding:0 1.125rem}
+  .bar{margin-bottom:3rem}
+  section{margin-top:3rem}
+  .counts div{flex-basis:100%}
+  .drop{padding:2.5rem 1rem}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="bar">
+    <b>venera2picacomic</b>
+    <span><a href="https://github.com/buzhidao10068/venera2picacomic">源码与格式说明 ↗</a></span>
+  </div>
+
+  <div class="hero">
+    <h1 class="transform">
+      <span class="src">.venera</span><span class="arw">──▶</span><span class="dst">.picadata</span>
+    </h1>
+    <p class="lede">把 Venera 导出的<strong>收藏夹</strong>和<strong>阅读历史</strong>转成 PicaComic 能导入的备份文件。两个 App 同源，但列名、来源编号、压缩包内文件名全都不一致，直接改扩展名无效——必须重建数据库。</p>
+    <p class="lede">转换在这个页面里完成。<strong>没有服务器，页面加载完不会再发出任何网络请求</strong>——断网也能用，你的文件一步都不会离开这台设备。</p>
+  </div>
+
+  <section>
+    <h2>选择文件</h2>
+    <button type="button" class="drop" id="drop">
+      <b id="dropTitle">把 .venera 文件拖到这里</b>
+      <small id="dropHint">或点击选择</small>
+      <input type="file" id="file" accept=".venera,.zip" tabindex="-1" aria-hidden="true">
+    </button>
+
+    <details class="adv">
+      <summary>已经在用 PicaComic？可以保留登录状态和已装的源</summary>
+      <div class="body">
+        <p style="margin:0">不选的话，生成的包里带一份最小 <code>appdata</code>，你 PicaComic 里的设置一项都不会被覆盖，但 cookie 和已装的漫画源不受影响也不会被带进来。<br>
+        选一份你自己从 PicaComic 导出的 <code>.picadata</code>，它的 <code>appdata</code>、<code>cookies.db</code>、<code>comic_source</code> 会被原样保留，只替换两个数据库。</p>
+        <label>
+          选择 PicaComic 导出的 .picadata
+          <input type="file" id="base" accept=".picadata,.zip">
+        </label>
+        <span class="picked" id="basePicked" hidden></span>
+      </div>
+    </details>
+
+    <p class="status" id="status" aria-live="polite"></p>
+    <div class="err" id="err" hidden><b id="errTitle"></b><span id="errBody"></span></div>
+  </section>
+
+  <div id="out" hidden>
+
+    <section>
+      <h2>转换结果</h2>
+      <dl class="counts">
+        <div><dt>阅读历史</dt><dd id="cHistory">–</dd></div>
+        <div><dt>收藏</dt><dd id="cComics">–</dd></div>
+        <div><dt>收藏夹</dt><dd id="cFolders">–</dd></div>
+        <div><dt>输出体积</dt><dd id="cSize">–</dd></div>
+      </dl>
+    </section>
+
+    <section>
+      <h2>来源编号重映射 <em id="remapNote"></em></h2>
+      <div class="scroll">
+        <table id="remap">
+          <thead><tr>
+            <th>Venera <span class="hash">hashCode</span></th><th>源</th>
+            <th class="num">历史</th><th class="num">收藏</th>
+            <th>PicaComic type</th><th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="note" id="remapFoot"></p>
+    </section>
+
+    <section>
+      <h2>收藏夹 <em id="folderNote"></em></h2>
+      <div class="scroll">
+        <table id="folders">
+          <thead><tr><th class="num">顺序</th><th>名称</th><th class="num">本数</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>导入前自检 <em id="ledgerNote"></em></h2>
+      <ul class="ledger" id="ledger"></ul>
+      <div class="replay" id="replay"></div>
+      <p class="note">每一项都对应 PicaComic 导入代码里一个真实的行为，不是泛泛的格式校验。下半部分把它的
+        <code>readDataFromJson</code>、<code>LocalFavoritesManager.readData</code> 和
+        <code>HistoryManager.tryUpdateDb</code> 用同样的 SQL、同样的列名、同样的
+        <code>int.parse</code> 严格度重放了一遍——会在 App 里抛异常的行，在这里就会失败。</p>
+    </section>
+
+    <div class="finish">
+      <button type="button" class="dl" id="dl"></button>
+      <p class="after" id="after"></p>
+    </div>
+  </div>
+
+  <footer>
+    <p>本工具由 AI（Claude）编写，格式结论来自通读 PicaComic 源码，未经人工逐行审阅。<strong style="color:var(--dim)">导入会写入你的收藏库和历史库，操作前请先在 PicaComic 里导出一份备份。</strong></p>
+    <p><span class="mono">.venera</span> 里的 <span class="mono">appdata.json</span> 明文保存着 WebDAV 账号密码，<span class="mono">cookie.db</span> 是各站登录态。这个页面不读取、不发送这两个文件——但你在别处分享导出文件时要留意。</p>
+    <p><a href="https://github.com/buzhidao10068/venera2picacomic">buzhidao10068/venera2picacomic</a> · MIT · 与 Venera、PicaComic 两个项目均无关联</p>
+  </footer>
+
+</div>
+
+<!-- fflate 0.8.3 inlined (32 KB, MIT); sql.js 1.14.2 from cdnjs.
+     The script tag is pinned by version and verified by SRI. The
+     643 KB sql-wasm.wasm beside it cannot be: Emscripten fetches it
+     itself, and there is no integrity attribute for that. -->
+<script>
+!function(f){typeof module!='undefined'&&typeof exports=='object'?module.exports=f():typeof define!='undefined'&&define.amd?define(f):(typeof self!='undefined'?self:this).fflate=f()}(function(){var _e={};"use strict";_e.deflate=zt,_e.deflateSync=kt,_e.inflate=At,_e.inflateSync=Tt,_e.gzip=It,_e.compress=It,_e.gzipSync=Ut,_e.compressSync=Ut,_e.gunzip=Zt,_e.gunzipSync=qt,_e.zlib=Lt,_e.zlibSync=Bt,_e.unzlib=Nt,_e.unzlibSync=Pt,_e.gzip=It,_e.compress=It,_e.decompress=Jt,_e.decompressSync=Kt,_e.strToU8=nn,_e.strFromU8=rn,_e.zip=dn,_e.zipSync=gn,_e.unzip=zn,_e.unzipSync=kn;var t=(typeof module!='undefined'&&typeof exports=='object'?function(_f){"use strict";var e,r,t,n=";var __w=require('worker_threads');__w.parentPort.on('message',function(m){onmessage({data:m})}),postMessage=function(m,t){__w.parentPort.postMessage(m,t)},close=process.exit;self=global";try{e=require("worker_threads"),r=e.Worker,t=e.isMarkedAsUntransferable}catch(e){}exports.default=r?function(e,o,a,s,u){var i=!1,l=new r(e+n,{eval:!0}).on("error",function(e){return u(e,null)}).on("message",function(e){return u(null,e)}).on("exit",function(e){e&&!i&&u(Error("exited with code "+e),null)});return t&&(s=s.filter(function(e){return!t(e)})),l.postMessage(a,s),l.terminate=function(){return i=!0,r.prototype.terminate.call(l)},l}:function(e,r,t,n,o){setImmediate(function(){return o(Error("async operations unsupported - update to Node 12+ (or Node 10-11 with the --experimental-worker CLI flag)"),null)});var a=function(){};return{terminate:a,postMessage:a}};return _f}:function(_f){"use strict";var e={};_f.default=function(r,t,s,a,n){var o=new Worker(e[t]||(e[t]=URL.createObjectURL(new Blob([r+';addEventListener("error",function(e){e=e.error;postMessage({$e$:[e.message,e.code,e.stack]})})'],{type:"text/javascript"}))));return o.onmessage=function(e){var r=e.data,t=r.$e$;if(t){var s=Error(t[0]);s.code=t[1],s.stack=t[2],n(s,null)}else n(null,r)},o.postMessage(s,a),o};return _f})({}),n=Uint8Array,r=Uint16Array,i=Int32Array,e=new n([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),o=new n([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),s=new n([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),a=function(t,n){for(var e=new r(31),o=0;o<31;++o)e[o]=n+=1<<t[o-1];var s=new i(e[30]);for(o=1;o<30;++o)for(var a=e[o];a<e[o+1];++a)s[a]=a-e[o]<<5|o;return{b:e,r:s}},u=a(e,2),h=u.b,f=u.r;h[28]=258,f[258]=28;for(var c=a(o,0),l=c.b,p=c.r,v=new r(32768),d=0;d<32768;++d){var g=(43690&d)>>1|(21845&d)<<1;v[d]=((65280&(g=(61680&(g=(52428&g)>>2|(13107&g)<<2))>>4|(3855&g)<<4))>>8|(255&g)<<8)>>1}var y=function(t,n,i){for(var e=t.length,o=0,s=new r(n);o<e;++o)t[o]&&++s[t[o]-1];var a,u=new r(n);for(o=1;o<n;++o)u[o]=u[o-1]+s[o-1]<<1;if(i){a=new r(1<<n);var h=15-n;for(o=0;o<e;++o)if(t[o])for(var f=o<<4|t[o],c=n-t[o],l=u[t[o]-1]++<<c,p=l|(1<<c)-1;l<=p;++l)a[v[l]>>h]=f}else for(a=new r(e),o=0;o<e;++o)t[o]&&(a[o]=v[u[t[o]-1]++]>>15-t[o]);return a},m=new n(288);for(d=0;d<144;++d)m[d]=8;for(d=144;d<256;++d)m[d]=9;for(d=256;d<280;++d)m[d]=7;for(d=280;d<288;++d)m[d]=8;var b=new n(32);for(d=0;d<32;++d)b[d]=5;var w=y(m,9,0),x=y(m,9,1),z=y(b,5,0),k=y(b,5,1),M=function(t){for(var n=t[0],r=1;r<t.length;++r)t[r]>n&&(n=t[r]);return n},S=function(t,n,r){var i=n/8|0;return(t[i]|t[i+1]<<8)>>(7&n)&r},A=function(t,n){var r=n/8|0;return(t[r]|t[r+1]<<8|t[r+2]<<16)>>(7&n)},T=function(t){return(t+7)/8|0},D=function(t,r,i){return(null==r||r<0)&&(r=0),(null==i||i>t.length)&&(i=t.length),new n(t.subarray(r,i))};_e.FlateErrorCode={UnexpectedEOF:0,InvalidBlockType:1,InvalidLengthLiteral:2,InvalidDistance:3,StreamFinished:4,NoStreamHandler:5,InvalidHeader:6,NoCallback:7,InvalidUTF8:8,ExtraFieldTooLong:9,InvalidDate:10,FilenameTooLong:11,StreamFinishing:12,InvalidZipData:13,UnknownCompressionMethod:14};var C=["unexpected EOF","invalid block type","invalid length/literal","invalid distance","stream finished","no stream handler",,"no callback","invalid UTF-8 data","extra field too long","date not in range 1980-2099","filename too long","stream finishing","invalid zip data"],I=function(t,n,r){var i=Error(n||C[t]);if(i.code=t,Error.captureStackTrace&&Error.captureStackTrace(i,I),!r)throw i;return i},U=function(t,r,i,a){var u=t.length,f=a?a.length:0;if(!u||r.f&&!r.l)return i||new n(0);var c=!i,p=c||2!=r.i,v=r.i;c&&(i=new n(3*u));var d=function(t){var r=i.length;if(t>r){var e=new n(Math.max(2*r,t));e.set(i),i=e}},g=r.f||0,m=r.p||0,b=r.b||0,w=r.l,z=r.d,C=r.m,U=r.n,F=8*u;do{if(!w){g=S(t,m,1);var E=S(t,m+1,3);if(m+=3,!E){var Z=t[(Y=T(m)+4)-4]|t[Y-3]<<8,q=Y+Z;if(q>u){v&&I(0);break}p&&d(b+Z),i.set(t.subarray(Y,q),b),r.b=b+=Z,r.p=m=8*q,r.f=g;continue}if(1==E)w=x,z=k,C=9,U=5;else if(2==E){var O=S(t,m,31)+257,G=S(t,m+10,15)+4,L=O+S(t,m+5,31)+1;m+=14;for(var B=new n(L),H=new n(19),j=0;j<G;++j)H[s[j]]=S(t,m+3*j,7);m+=3*G;var N=M(H),P=(1<<N)-1,V=y(H,N,1);for(j=0;j<L;){var Y,J=V[S(t,m,P)];if(m+=15&J,(Y=J>>4)<16)B[j++]=Y;else{var K=0,Q=0;for(16==Y?(Q=3+S(t,m,3),m+=2,K=B[j-1]):17==Y?(Q=3+S(t,m,7),m+=3):18==Y&&(Q=11+S(t,m,127),m+=7);Q--;)B[j++]=K}}var R=B.subarray(0,O),W=B.subarray(O);C=M(R),U=M(W),w=y(R,C,1),z=y(W,U,1)}else I(1);if(m>F){v&&I(0);break}}p&&d(b+131072);for(var X=(1<<C)-1,$=(1<<U)-1,_=m;;_=m){var tt=(K=w[A(t,m)&X])>>4;if((m+=15&K)>F){v&&I(0);break}if(K||I(2),tt<256)i[b++]=tt;else{if(256==tt){_=m,w=null;break}var nt=tt-254;tt>264&&(nt=S(t,m,(1<<(et=e[j=tt-257]))-1)+h[j],m+=et);var rt=z[A(t,m)&$],it=rt>>4;if(rt||I(3),m+=15&rt,W=l[it],it>3){var et=o[it];W+=A(t,m)&(1<<et)-1,m+=et}if(m>F){v&&I(0);break}p&&d(b+131072);var ot=b+nt;if(b<W){var st=f-W,at=Math.min(W,ot);for(st+b<0&&I(3);b<at;++b)i[b]=a[st+b]}for(;b<ot;++b)i[b]=i[b-W]}}r.l=w,r.p=_,r.b=b,r.f=g,w&&(g=1,r.m=C,r.d=z,r.n=U)}while(!g);return b!=i.length&&c?D(i,0,b):i.subarray(0,b)},F=function(t,n,r){var i=n/8|0;t[i]|=r<<=7&n,t[i+1]|=r>>8},E=function(t,n,r){var i=n/8|0;t[i]|=r<<=7&n,t[i+1]|=r>>8,t[i+2]|=r>>16},Z=function(t,i){for(var e=[],o=0;o<t.length;++o)t[o]&&e.push({s:o,f:t[o]});var s=e.length,a=e.slice();if(!s)return{t:j,l:0};if(1==s){var u=new n(e[0].s+1);return u[e[0].s]=1,{t:u,l:1}}e.sort(function(t,n){return t.f-n.f}),e.push({s:-1,f:25001});var h=e[0],f=e[1],c=0,l=1,p=2;for(e[0]={s:-1,f:h.f+f.f,l:h,r:f};l!=s-1;)h=e[e[c].f<e[p].f?c++:p++],f=e[c!=l&&e[c].f<e[p].f?c++:p++],e[l++]={s:-1,f:h.f+f.f,l:h,r:f};var v=a[0].s;for(o=1;o<s;++o)a[o].s>v&&(v=a[o].s);var d=new r(v+1),g=q(e[l-1],d,0);if(g>i){o=0;var y=0,m=g-i,b=1<<m;for(a.sort(function(t,n){return d[n.s]-d[t.s]||t.f-n.f});o<s;++o){var w=a[o].s;if(!(d[w]>i))break;y+=b-(1<<g-d[w]),d[w]=i}for(y>>=m;y>0;){var x=a[o].s;d[x]<i?y-=1<<i-d[x]++-1:++o}for(;o>=0&&y;--o){var z=a[o].s;d[z]==i&&(--d[z],++y)}g=i}return{t:new n(d),l:g}},q=function(t,n,r){return-1==t.s?Math.max(q(t.l,n,r+1),q(t.r,n,r+1)):n[t.s]=r},O=function(t){for(var n=t.length;n&&!t[--n];);for(var i=new r(++n),e=0,o=t[0],s=1,a=function(t){i[e++]=t},u=1;u<=n;++u)if(t[u]==o&&u!=n)++s;else{if(!o&&s>2){for(;s>138;s-=138)a(32754);s>2&&(a(s>10?s-11<<5|28690:s-3<<5|12305),s=0)}else if(s>3){for(a(o),--s;s>6;s-=6)a(8304);s>2&&(a(s-3<<5|8208),s=0)}for(;s--;)a(o);s=1,o=t[u]}return{c:i.subarray(0,e),n:n}},G=function(t,n){for(var r=0,i=0;i<n.length;++i)r+=t[i]*n[i];return r},L=function(t,n,r){var i=r.length,e=T(n+2);t[e]=255&i,t[e+1]=i>>8,t[e+2]=255^t[e],t[e+3]=255^t[e+1];for(var o=0;o<i;++o)t[e+o+4]=r[o];return 8*(e+4+i)},B=function(t,n,i,a,u,h,f,c,l,p,v){F(n,v++,i),++u[256];for(var d=Z(u,15),g=d.t,x=d.l,k=Z(h,15),M=k.t,S=k.l,A=O(g),T=A.c,D=A.n,C=O(M),I=C.c,U=C.n,q=new r(19),B=0;B<T.length;++B)++q[31&T[B]];for(B=0;B<I.length;++B)++q[31&I[B]];for(var H=Z(q,7),j=H.t,N=H.l,P=19;P>4&&!j[s[P-1]];--P);var V,Y,J,K,Q=p+5<<3,R=G(u,m)+G(h,b)+f,W=G(u,g)+G(h,M)+f+14+3*P+G(q,j)+2*q[16]+3*q[17]+7*q[18];if(l>=0&&Q<=R&&Q<=W)return L(n,v,t.subarray(l,l+p));if(F(n,v,1+(W<R)),v+=2,W<R){V=y(g,x,0),Y=g,J=y(M,S,0),K=M;var X=y(j,N,0);for(F(n,v,D-257),F(n,v+5,U-1),F(n,v+10,P-4),v+=14,B=0;B<P;++B)F(n,v+3*B,j[s[B]]);v+=3*P;for(var $=[T,I],_=0;_<2;++_){var tt=$[_];for(B=0;B<tt.length;++B)F(n,v,X[rt=31&tt[B]]),v+=j[rt],rt>15&&(F(n,v,tt[B]>>5&127),v+=tt[B]>>12)}}else V=w,Y=m,J=z,K=b;for(B=0;B<c;++B){var nt=a[B];if(nt>255){var rt;E(n,v,V[257+(rt=nt>>18&31)]),v+=Y[rt+257],rt>7&&(F(n,v,nt>>23&31),v+=e[rt]);var it=31&nt;E(n,v,J[it]),v+=K[it],it>3&&(E(n,v,nt>>5&8191),v+=o[it])}else E(n,v,V[nt]),v+=Y[nt]}return E(n,v,V[256]),v+Y[256]},H=new i([65540,131080,131088,131104,262176,1048704,1048832,2114560,2117632]),j=new n(0),N=function(t,s,a,u,h,c){var l=c.z||t.length,v=new n(u+l+5*(1+Math.ceil(l/7e3))+h),d=v.subarray(u,v.length-h),g=c.l,y=7&(c.r||0);if(s){y&&(d[0]=c.r>>3);for(var m=H[s-1],b=m>>13,w=8191&m,x=(1<<a)-1,z=c.p||new r(32768),k=c.h||new r(x+1),M=Math.ceil(a/3),S=2*M,A=function(n){return(t[n]^t[n+1]<<M^t[n+2]<<S)&x},C=new i(25e3),I=new r(288),U=new r(32),F=0,E=0,Z=c.i||0,q=0,O=c.w||0,G=0;Z+2<l;++Z){var j=A(Z),N=32767&Z,P=k[j];if(z[N]=P,k[j]=N,O<=Z){var V=l-Z;if((F>7e3||q>24576)&&(V>423||!g)){y=B(t,d,0,C,I,U,E,q,G,Z-G,y),q=F=E=0,G=Z;for(var Y=0;Y<286;++Y)I[Y]=0;for(Y=0;Y<30;++Y)U[Y]=0}var J=2,K=0,Q=w,R=N-P&32767;if(V>2&&j==A(Z-R))for(var W=Math.min(b,V)-1,X=Math.min(32767,Z),$=Math.min(258,V);R<=X&&--Q&&N!=P;){if(t[Z+J]==t[Z+J-R]){for(var _=0;_<$&&t[Z+_]==t[Z+_-R];++_);if(_>J){if(J=_,K=R,_>W)break;var tt=Math.min(R,_-2),nt=0;for(Y=0;Y<tt;++Y){var rt=Z-R+Y&32767,it=rt-z[rt]&32767;it>nt&&(nt=it,P=rt)}}}R+=(N=P)-(P=z[N])&32767}if(K){C[q++]=268435456|f[J]<<18|p[K];var et=31&f[J],ot=31&p[K];E+=e[et]+o[ot],++I[257+et],++U[ot],O=Z+J,++F}else C[q++]=t[Z],++I[t[Z]]}}for(Z=Math.max(Z,O);Z<l;++Z)C[q++]=t[Z],++I[t[Z]];y=B(t,d,g,C,I,U,E,q,G,Z-G,y),g||(c.r=7&y|d[y/8|0]<<3,y-=7,c.h=k,c.p=z,c.i=Z,c.w=O)}else{for(Z=c.w||0;Z<l+g;Z+=65535){var st=Z+65535;st>=l&&(d[y/8|0]=g,st=l),y=L(d,y+1,t.subarray(Z,st))}c.i=l}return D(v,0,u+T(y)+h)},P=function(){for(var t=new Int32Array(256),n=0;n<256;++n){for(var r=n,i=9;--i;)r=(1&r&&-306674912)^r>>>1;t[n]=r}return t}(),V=function(){var t=-1;return{p:function(n){for(var r=t,i=0;i<n.length;++i)r=P[255&r^n[i]]^r>>>8;t=r},d:function(){return~t}}},Y=function(){var t=1,n=0;return{p:function(r){for(var i=t,e=n,o=0|r.length,s=0;s!=o;){for(var a=Math.min(s+2655,o);s<a;++s)e+=i+=r[s];i=(65535&i)+15*(i>>16),e=(65535&e)+15*(e>>16)}t=i,n=e},d:function(){return(255&(t%=65521))<<24|(65280&t)<<8|(255&(n%=65521))<<8|n>>8}}},J=function(t,r,i,e,o){if(!o&&(o={l:1},r.dictionary)){var s=r.dictionary.subarray(-32768),a=new n(s.length+t.length);a.set(s),a.set(t,s.length),t=a,o.w=s.length}return N(t,null==r.level?6:r.level,null==r.mem?o.l?Math.ceil(1.5*Math.max(8,Math.min(13,Math.log(t.length)))):20:12+r.mem,i,e,o)},K=function(t,n){var r={};for(var i in t)r[i]=t[i];for(var i in n)r[i]=n[i];return r},Q=function(t,n,r){for(var i=t(),e=""+t,o=e.slice(e.indexOf("[")+1,e.lastIndexOf("]")).replace(/\s+/g,"").split(","),s=0;s<i.length;++s){var a=i[s],u=o[s];if("function"==typeof a){n+=";"+u+"=";var h=""+a;if(a.prototype)if(-1!=h.indexOf("[native code]")){var f=h.indexOf(" ",8)+1;n+=h.slice(f,h.indexOf("(",f))}else for(var c in n+=h,a.prototype)n+=";"+u+".prototype."+c+"="+a.prototype[c];else n+=h}else r[u]=a}return n},R=[],W=function(t){var n=[];for(var r in t)t[r].buffer&&n.push((t[r]=new t[r].constructor(t[r])).buffer);return n},X=function(n,r,i,e){if(!R[i]){for(var o="",s={},a=n.length-1,u=0;u<a;++u)o=Q(n[u],o,s);R[i]={c:Q(n[a],o,s),e:s}}var h=K({},R[i].e);return(0,t.default)(R[i].c+";onmessage=function(e){for(var k in e.data)self[k]=e.data[k];onmessage="+r+"}",i,h,W(h),e)},$=function(){return[n,r,i,e,o,s,h,l,x,k,v,C,y,M,S,A,T,D,I,U,Tt,et,ot]},_=function(){return[n,r,i,e,o,s,f,p,w,m,z,b,v,H,j,y,F,E,Z,q,O,G,L,B,T,D,N,J,kt,et]},tt=function(){return[pt,gt,lt,V,P]},nt=function(){return[vt,dt]},rt=function(){return[yt,lt,Y]},it=function(){return[mt]},et=function(t){return postMessage(t,[t.buffer])},ot=function(t){return t&&{out:t.size&&new n(t.size),dictionary:t.dictionary}},st=function(t,n,r,i,e,o){var s=X(r,i,e,function(t,n){s.terminate(),o(t,n)});return s.postMessage([t,n],n.consume?[t.buffer]:[]),function(){s.terminate()}},at=function(t){return t.ondata=function(t,n){return postMessage([t,n],[t.buffer])},function(n){n.data[0]?(t.push(n.data[0],n.data[1]),postMessage([n.data[0].length])):t.flush(n.data[1])}},ut=function(t,n,r,i,e,o,s){var a,u=X(t,i,e,function(t,r){t?(u.terminate(),n.ondata.call(n,t)):Array.isArray(r)?1==r.length?(n.queuedSize-=r[0],n.ondrain&&n.ondrain(r[0])):(r[1]&&u.terminate(),n.ondata.call(n,t,r[0],r[1])):s(r)});u.postMessage(r),n.queuedSize=0,n.push=function(t,r){n.ondata||I(5),a&&n.ondata(I(4,0,1),null,!!r),n.queuedSize+=t.length,u.postMessage([t,a=r],t.buffer instanceof ArrayBuffer?[t.buffer]:[])},n.terminate=function(){u.terminate()},o&&(n.flush=function(t){u.postMessage([0,t])})},ht=function(t,n){return t[n]|t[n+1]<<8},ft=function(t,n){return(t[n]|t[n+1]<<8|t[n+2]<<16|t[n+3]<<24)>>>0},ct=function(t,n){return ft(t,n)+4294967296*ft(t,n+4)},lt=function(t,n,r){for(;r;++n)t[n]=r,r>>>=8},pt=function(t,n){var r=n.filename;if(t[0]=31,t[1]=139,t[2]=8,t[8]=n.level<2?4:9==n.level?2:0,t[9]=3,0!=n.mtime&&lt(t,4,Math.floor(new Date(n.mtime||Date.now())/1e3)),r){t[3]=8;for(var i=0;i<=r.length;++i)t[i+10]=r.charCodeAt(i)}},vt=function(t){31==t[0]&&139==t[1]&&8==t[2]||I(6,"invalid gzip data");var n=t[3],r=10;4&n&&(r+=2+(t[10]|t[11]<<8));for(var i=(n>>3&1)+(n>>4&1);i>0;i-=!t[r++]);return r+(2&n)},dt=function(t){var n=t.length;return(t[n-4]|t[n-3]<<8|t[n-2]<<16|t[n-1]<<24)>>>0},gt=function(t){return 10+(t.filename?t.filename.length+1:0)},yt=function(t,n){var r=n.level,i=0==r?0:r<6?1:9==r?3:2;if(t[0]=120,t[1]=i<<6|(n.dictionary&&32),t[1]|=31-(t[0]<<8|t[1])%31,n.dictionary){var e=Y();e.p(n.dictionary),lt(t,2,e.d())}},mt=function(t,n){return(8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31)&&I(6,"invalid zlib data"),(t[1]>>5&1)==+!n&&I(6,"invalid zlib data: "+(32&t[1]?"need":"unexpected")+" dictionary"),2+(t[1]>>3&4)};function bt(t,n){return"function"==typeof t&&(n=t,t={}),this.ondata=n,t}var wt=function(){function t(t,r){if("function"==typeof t&&(r=t,t={}),this.ondata=r,this.o=t||{},this.s={l:0,i:32768,w:32768,z:32768},this.b=new n(98304),this.o.dictionary){var i=this.o.dictionary.subarray(-32768);this.b.set(i,32768-i.length),this.s.i=32768-i.length}}return t.prototype.p=function(t,n){this.ondata(J(t,this.o,0,0,this.s),n)},t.prototype.push=function(t,r){this.ondata||I(5),this.s.l&&I(4);var i=t.length+this.s.z;if(i>this.b.length){if(i>2*this.b.length-32768){var e=new n(-32768&i);e.set(this.b.subarray(0,this.s.z)),this.b=e}var o=this.b.length-this.s.z;this.b.set(t.subarray(0,o),this.s.z),this.s.z=this.b.length,this.p(this.b,!1),this.b.set(this.b.subarray(-32768)),this.b.set(t.subarray(o),32768),this.s.z=t.length-o+32768,this.s.i=32766,this.s.w=32768}else this.b.set(t,this.s.z),this.s.z+=t.length;this.s.l=1&r,(this.s.z>this.s.w+8191||r)&&(this.p(this.b,r||!1),this.s.w=this.s.i,this.s.i-=2),r&&(this.s=this.o={},this.b=j)},t.prototype.flush=function(t){if(this.ondata||I(5),this.s.l&&I(4),this.p(this.b,!1),this.s.w=this.s.i,this.s.i-=2,t){var r=new n(6);r[0]=this.s.r>>3;var i=L(r,this.s.r,j);this.s.r=0,this.ondata(r.subarray(0,i>>3),!1)}},t}();_e.Deflate=wt;var xt=function(){return function(t,n){ut([_,function(){return[at,wt]}],this,bt.call(this,t,n),function(t){var n=new wt(t.data);onmessage=at(n)},6,1)}}();function zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_],function(t){return et(kt(t.data[0],t.data[1]))},0,r)}function kt(t,n){return J(t,n||{},0,0)}_e.AsyncDeflate=xt;var Mt=function(){function t(t,r){"function"==typeof t&&(r=t,t={}),this.ondata=r;var i=t&&t.dictionary&&t.dictionary.subarray(-32768);this.s={i:0,b:i?i.length:0},this.o=new n(32768),this.p=new n(0),i&&this.o.set(i)}return t.prototype.e=function(t){if(this.ondata||I(5),this.d&&I(4),this.p.length){if(t.length){var r=new n(this.p.length+t.length);r.set(this.p),r.set(t,this.p.length),this.p=r}}else this.p=t},t.prototype.c=function(t){this.s.i=+(this.d=t||!1);var n=this.s.b,r=U(this.p,this.s,this.o);this.ondata(D(r,n,this.s.b),this.d),this.o=D(r,this.s.b-32768),this.s.b=this.o.length,this.p=D(this.p,this.s.p/8|0),this.s.p&=7},t.prototype.push=function(t,n){this.e(t),this.c(n)},t}();_e.Inflate=Mt;var St=function(){return function(t,n){ut([$,function(){return[at,Mt]}],this,bt.call(this,t,n),function(t){var n=new Mt(t.data);onmessage=at(n)},7,0)}}();function At(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$],function(t){return et(Tt(t.data[0],ot(t.data[1])))},1,r)}function Tt(t,n){return U(t,{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncInflate=St;var Dt=function(){function t(t,n){this.c=V(),this.l=0,this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),this.l+=t.length,wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=J(t,this.o,this.v&&gt(this.o),n&&8,this.s);this.v&&(pt(r,this.o),this.v=0),n&&(lt(r,r.length-8,this.c.d()),lt(r,r.length-4,this.l)),this.ondata(r,n)},t.prototype.flush=function(t){wt.prototype.flush.call(this,t)},t}();_e.Gzip=Dt,_e.Compress=Dt;var Ct=function(){return function(t,n){ut([_,tt,function(){return[at,wt,Dt]}],this,bt.call(this,t,n),function(t){var n=new Dt(t.data);onmessage=at(n)},8,1)}}();function It(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,tt,function(){return[Ut]}],function(t){return et(Ut(t.data[0],t.data[1]))},2,r)}function Ut(t,n){n||(n={});var r=V(),i=t.length;r.p(t);var e=J(t,n,gt(n),8),o=e.length;return pt(e,n),lt(e,o-8,r.d()),lt(e,o-4,i),e}_e.AsyncGzip=Ct,_e.AsyncCompress=Ct;var Ft=function(){function t(t,n){this.v=1,this.r=0,Mt.call(this,t,n)}return t.prototype.push=function(t,r){if(Mt.prototype.e.call(this,t),this.r+=t.length,this.v){var i=this.p.subarray(this.v-1),e=i.length>3?vt(i):4;if(e>i.length){if(!r)return}else this.v>1&&this.onmember&&this.onmember(this.r-i.length);this.p=i.subarray(e),this.v=0}Mt.prototype.c.call(this,0),this.s.f&&!this.s.l?(this.v=T(this.s.p)+9,this.s={i:0},this.o=new n(0),this.push(new n(0),r)):r&&Mt.prototype.c.call(this,r)},t}();_e.Gunzip=Ft;var Et=function(){return function(t,n){var r=this;ut([$,nt,function(){return[at,Mt,Ft]}],this,bt.call(this,t,n),function(t){var n=new Ft(t.data);n.onmember=function(t){return postMessage(t)},onmessage=at(n)},9,0,function(t){return r.onmember&&r.onmember(t)})}}();function Zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,nt,function(){return[qt]}],function(t){return et(qt(t.data[0],t.data[1]))},3,r)}function qt(t,r){var i=vt(t);return i+8>t.length&&I(6,"invalid gzip data"),U(t.subarray(i,-8),{i:2},r&&r.out||new n(dt(t)),r&&r.dictionary)}_e.AsyncGunzip=Et;var Ot=function(){function t(t,n){this.c=Y(),this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=J(t,this.o,this.v&&(this.o.dictionary?6:2),n&&4,this.s);this.v&&(yt(r,this.o),this.v=0),n&&lt(r,r.length-4,this.c.d()),this.ondata(r,n)},t.prototype.flush=function(t){wt.prototype.flush.call(this,t)},t}();_e.Zlib=Ot;var Gt=function(){return function(t,n){ut([_,rt,function(){return[at,wt,Ot]}],this,bt.call(this,t,n),function(t){var n=new Ot(t.data);onmessage=at(n)},10,1)}}();function Lt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,rt,function(){return[Bt]}],function(t){return et(Bt(t.data[0],t.data[1]))},4,r)}function Bt(t,n){n||(n={});var r=Y();r.p(t);var i=J(t,n,n.dictionary?6:2,4);return yt(i,n),lt(i,i.length-4,r.d()),i}_e.AsyncZlib=Gt;var Ht=function(){function t(t,n){Mt.call(this,t,n),this.v=t&&t.dictionary?2:1}return t.prototype.push=function(t,n){if(Mt.prototype.e.call(this,t),this.v){if(this.p.length<6&&!n)return;this.p=this.p.subarray(mt(this.p,this.v-1)),this.v=0}n&&(this.p.length<4&&I(6,"invalid zlib data"),this.p=this.p.subarray(0,-4)),Mt.prototype.c.call(this,n)},t}();_e.Unzlib=Ht;var jt=function(){return function(t,n){ut([$,it,function(){return[at,Mt,Ht]}],this,bt.call(this,t,n),function(t){var n=new Ht(t.data);onmessage=at(n)},11,0)}}();function Nt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,it,function(){return[Pt]}],function(t){return et(Pt(t.data[0],ot(t.data[1])))},5,r)}function Pt(t,n){return U(t.subarray(mt(t,n&&n.dictionary),-4),{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncUnzlib=jt;var Vt=function(){function t(t,n){this.o=bt.call(this,t,n)||{},this.G=Ft,this.I=Mt,this.Z=Ht}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r){t.ondata(n,r)}},t.prototype.push=function(t,r){if(this.ondata||I(5),this.s)this.s.push(t,r);else{if(this.p&&this.p.length){var i=new n(this.p.length+t.length);i.set(this.p),i.set(t,this.p.length)}else this.p=t;this.p.length>2&&(this.s=31==this.p[0]&&139==this.p[1]&&8==this.p[2]?new this.G(this.o):8!=(15&this.p[0])||this.p[0]>>4>7||(this.p[0]<<8|this.p[1])%31?new this.I(this.o):new this.Z(this.o),this.i(),this.s.push(this.p,r),this.p=null)}},t}();_e.Decompress=Vt;var Yt=function(){function t(t,n){Vt.call(this,t,n),this.queuedSize=0,this.G=Et,this.I=St,this.Z=jt}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r,i){t.ondata(n,r,i)},this.s.ondrain=function(n){t.queuedSize-=n,t.ondrain&&t.ondrain(n)}},t.prototype.push=function(t,n){this.queuedSize+=t.length,Vt.prototype.push.call(this,t,n)},t}();function Jt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),31==t[0]&&139==t[1]&&8==t[2]?Zt(t,n,r):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?At(t,n,r):Nt(t,n,r)}function Kt(t,n){return 31==t[0]&&139==t[1]&&8==t[2]?qt(t,n):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?Tt(t,n):Pt(t,n)}_e.AsyncDecompress=Yt;var Qt=function(t,r,i,e){for(var o in t){var s=t[o],a=r+o,u=e;Array.isArray(s)&&(u=K(e,s[1]),s=s[0]),ArrayBuffer.isView(s)?i[a]=[s,u]:(i[a+="/"]=[new n(0),u],Qt(s,a,i,e))}},Rt="undefined"!=typeof TextEncoder&&new TextEncoder,Wt="undefined"!=typeof TextDecoder&&new TextDecoder,Xt=0;try{Wt.decode(j,{stream:!0}),Xt=1}catch(t){}var $t=function(t){for(var n="",r=0;;){var i=t[r++],e=(i>127)+(i>223)+(i>239);if(r+e>t.length)return{s:n,r:D(t,r-1)};e?3==e?(i=((15&i)<<18|(63&t[r++])<<12|(63&t[r++])<<6|63&t[r++])-65536,n+=String.fromCharCode(55296|i>>10,56320|1023&i)):n+=String.fromCharCode(1&e?(31&i)<<6|63&t[r++]:(15&i)<<12|(63&t[r++])<<6|63&t[r++]):n+=String.fromCharCode(i)}},_t=function(){function t(t){this.ondata=t,Xt?this.t=new TextDecoder:this.p=j}return t.prototype.push=function(t,r){if(this.ondata||I(5),r=!!r,this.t)return this.ondata(this.t.decode(t,{stream:!0}),r),void(r&&(this.t.decode().length&&I(8),this.t=null));this.p||I(4);var i=new n(this.p.length+t.length);i.set(this.p),i.set(t,this.p.length);var e=$t(i),o=e.s,s=e.r;r?(s.length&&I(8),this.p=null):this.p=s,this.ondata(o,r)},t}();_e.DecodeUTF8=_t;var tn=function(){function t(t){this.ondata=t}return t.prototype.push=function(t,n){this.ondata||I(5),this.d&&I(4),this.ondata(nn(t),this.d=n||!1)},t}();function nn(t,r){if(r){for(var i=new n(t.length),e=0;e<t.length;++e)i[e]=t.charCodeAt(e);return i}if(Rt)return Rt.encode(t);var o=t.length,s=new n(t.length+(t.length>>1)),a=0,u=function(t){s[a++]=t};for(e=0;e<o;++e){if(a+5>s.length){var h=new n(a+8+(o-e<<1));h.set(s),s=h}var f=t.charCodeAt(e);f<128||r?u(f):f<2048?(u(192|f>>6),u(128|63&f)):f>55295&&f<57344?(u(240|(f=65536+(1047552&f)|1023&t.charCodeAt(++e))>>18),u(128|f>>12&63),u(128|f>>6&63),u(128|63&f)):(u(224|f>>12),u(128|f>>6&63),u(128|63&f))}return D(s,0,a)}function rn(t,n){if(n){for(var r="",i=0;i<t.length;i+=16384)r+=String.fromCharCode.apply(null,t.subarray(i,i+16384));return r}if(Wt)return Wt.decode(t);var e=$t(t),o=e.s;return(r=e.r).length&&I(8),o}_e.EncodeUTF8=tn;var en=function(t){return 1==t?3:t<6?2:9==t?1:0},on=function(t,n){return n+30+ht(t,n+26)+ht(t,n+28)},sn=function(t,n,r){var i=ht(t,n+28),e=ht(t,n+30),o=rn(t.subarray(n+46,n+46+i),!(2048&ht(t,n+8))),s=n+46+i,a=an(t,s,e,r,ft(t,n+20),ft(t,n+24),ft(t,n+42)),u=a[0],h=a[1],f=a[2];return[ht(t,n+10),u,h,o,s+e+ht(t,n+32),f]},an=function(t,n,r,i,e,o,s){var a=4294967295==e,u=4294967295==o,h=4294967295==s,f=n+r;if(i&&a+u+h){for(;n+4<f;n+=4+ht(t,n+2))if(1==ht(t,n))return[a?ct(t,n+4+8*u):e,u?ct(t,n+4):o,h?ct(t,n+4+8*(u+a)):s,1];i<2&&I(13)}return[e,o,s,0]},un=function(t){var n=0;if(t)for(var r in t){var i=t[r].length;i>65535&&I(9),n+=i+4}return n},hn=function(t,n,r,i,e,o,s,a){var u=i.length,h=r.extra,f=a&&a.length,c=un(h);lt(t,n,null!=s?33639248:67324752),n+=4,null!=s&&(t[n++]=20,t[n++]=r.os),t[n]=20,n+=2,t[n++]=r.flag<<1|(o<0&&8),t[n++]=e&&8,t[n++]=255&r.compression,t[n++]=r.compression>>8;var l=new Date(null==r.mtime?Date.now():r.mtime),p=l.getFullYear()-1980;if((p<0||p>119)&&I(10),lt(t,n,p<<25|l.getMonth()+1<<21|l.getDate()<<16|l.getHours()<<11|l.getMinutes()<<5|l.getSeconds()>>1),n+=4,-1!=o&&(lt(t,n,r.crc),lt(t,n+4,o<0?-o-2:o),lt(t,n+8,r.size)),lt(t,n+12,u),lt(t,n+14,c),n+=16,null!=s&&(lt(t,n,f),lt(t,n+6,r.attrs),lt(t,n+10,s),n+=14),t.set(i,n),n+=u,c)for(var v in h){var d=h[v],g=d.length;lt(t,n,+v),lt(t,n+2,g),t.set(d,n+4),n+=4+g}return f&&(t.set(a,n),n+=f),n},fn=function(t,n,r,i,e){lt(t,n,101010256),lt(t,n+8,r),lt(t,n+10,r),lt(t,n+12,i),lt(t,n+16,e)},cn=function(){function t(t){this.filename=t,this.c=V(),this.size=0,this.compression=0}return t.prototype.process=function(t,n){this.ondata(null,t,n)},t.prototype.push=function(t,n){this.ondata||I(5),this.c.p(t),this.size+=t.length,n&&(this.crc=this.c.d()),this.process(t,n||!1)},t}();_e.ZipPassThrough=cn;var ln=function(){function t(t,n){var r=this;n||(n={}),cn.call(this,t),this.d=new wt(n,function(t,n){r.ondata(null,t,n)}),this.compression=8,this.flag=en(n.level)}return t.prototype.process=function(t,n){try{this.d.push(t,n)}catch(t){this.ondata(t,null,n)}},t.prototype.push=function(t,n){cn.prototype.push.call(this,t,n)},t}();_e.ZipDeflate=ln;var pn=function(){function t(t,n){var r=this;n||(n={}),cn.call(this,t),this.d=new xt(n,function(t,n,i){r.ondata(t,n,i)}),this.compression=8,this.flag=en(n.level),this.terminate=this.d.terminate}return t.prototype.process=function(t,n){this.d.push(t,n)},t.prototype.push=function(t,n){cn.prototype.push.call(this,t,n)},t}();_e.AsyncZipDeflate=pn;var vn=function(){function t(t){this.ondata=t,this.u=[],this.d=1}return t.prototype.add=function(t){var r=this;if(this.ondata||I(5),2&this.d)this.ondata(I(4+8*(1&this.d),0,1),null,!1);else{var i=nn(t.filename),e=i.length,o=t.comment,s=o&&nn(o),a=e!=t.filename.length||s&&o.length!=s.length,u=e+un(t.extra)+30;e>65535&&this.ondata(I(11,0,1),null,!1);var h=new n(u);hn(h,0,t,i,a,-1);var f=[h],c=function(){for(var t=0,n=f;t<n.length;t++)r.ondata(null,n[t],!1);f=[]},l=this.d;this.d=0;var p=this.u.length,v=K(t,{f:i,u:a,o:s,t:function(){t.terminate&&t.terminate()},r:function(){if(c(),l){var t=r.u[p+1];t?t.r():r.d=1}l=1}}),d=0;t.ondata=function(i,e,o){if(i)r.ondata(i,e,o),r.terminate();else if(d+=e.length,f.push(e),o){var s=new n(16);lt(s,0,134695760),lt(s,4,t.crc),lt(s,8,d),lt(s,12,t.size),f.push(s),v.c=d,v.b=u+d+16,v.crc=t.crc,v.size=t.size,l&&v.r(),l=1}else l&&c()},this.u.push(v)}},t.prototype.end=function(){var t=this;2&this.d?this.ondata(I(4+8*(1&this.d),0,1),null,!0):(this.d?this.e():this.u.push({r:function(){1&t.d&&(t.u.splice(-1,1),t.e())},t:function(){}}),this.d=3)},t.prototype.e=function(){for(var t=0,r=0,i=0,e=0,o=this.u;e<o.length;e++)i+=46+(h=o[e]).f.length+un(h.extra)+(h.o?h.o.length:0);for(var s=new n(i+22),a=0,u=this.u;a<u.length;a++){var h;hn(s,t,h=u[a],h.f,h.u,-h.c-2,r,h.o),t+=46+h.f.length+un(h.extra)+(h.o?h.o.length:0),r+=h.b}fn(s,t,this.u.length,i,r),this.ondata(null,s,!0),this.d=2},t.prototype.terminate=function(){for(var t=0,n=this.u;t<n.length;t++)n[t].t();this.d=2},t}();function dn(t,r,i){i||(i=r,r={}),"function"!=typeof i&&I(7);var e={};Qt(t,"",e,r);var o=Object.keys(e),s=o.length,a=0,u=0,h=s,f=Array(s),c=[],l=function(){for(var t=0;t<c.length;++t)c[t]()},p=function(t,n){xn(function(){i(t,n)})};xn(function(){p=i});var v=function(){var t=new n(u+22),r=a,i=u-a;u=0;for(var e=0;e<h;++e){var o=f[e];try{var s=o.c.length;hn(t,u,o,o.f,o.u,s);var c=30+o.f.length+un(o.extra),l=u+c;t.set(o.c,l),hn(t,a,o,o.f,o.u,s,u,o.m),a+=16+c+(o.m?o.m.length:0),u=l+s}catch(t){return p(t,null)}}fn(t,a,f.length,i,r),p(null,t)};s||v();for(var d=function(t){var n=o[t],r=e[n],i=r[0],h=r[1],d=V(),g=i.length;d.p(i);var y=nn(n),m=y.length,b=h.comment,w=b&&nn(b),x=w&&w.length,z=un(h.extra),k=0==h.level?0:8,M=function(r,i){if(r)l(),p(r,null);else{var e=i.length;f[t]=K(h,{size:g,crc:d.d(),c:i,f:y,m:w,u:m!=n.length||w&&b.length!=x,compression:k}),a+=30+m+z+e,u+=76+2*(m+z)+(x||0)+e,--s||v()}};if(m>65535&&M(I(11,0,1),null),k)if(g<16e4)try{M(null,kt(i,h))}catch(t){M(t,null)}else c.push(zt(i,h,M));else M(null,i)},g=0;g<h;++g)d(g);return l}function gn(t,r){r||(r={});var i={},e=[];Qt(t,"",i,r);var o=0,s=0;for(var a in i){var u=i[a],h=u[0],f=u[1],c=0==f.level?0:8,l=(M=nn(a)).length,p=f.comment,v=p&&nn(p),d=v&&v.length,g=un(f.extra);l>65535&&I(11);var y=c?kt(h,f):h,m=y.length,b=V();b.p(h),e.push(K(f,{size:h.length,crc:b.d(),c:y,f:M,m:v,u:l!=a.length||v&&p.length!=d,o:o,compression:c})),o+=30+l+g+m,s+=76+2*(l+g)+(d||0)+m}for(var w=new n(s+22),x=o,z=s-o,k=0;k<e.length;++k){var M;hn(w,(M=e[k]).o,M,M.f,M.u,M.c.length);var S=30+M.f.length+un(M.extra);w.set(M.c,M.o+S),hn(w,o,M,M.f,M.u,M.c.length,M.o,M.m),o+=16+S+(M.m?M.m.length:0)}return fn(w,o,e.length,z,x),w}_e.Zip=vn;var yn=function(){function t(){}return t.prototype.push=function(t,n){this.ondata(null,t,n)},t.compression=0,t}();_e.UnzipPassThrough=yn;var mn=function(){function t(){var t=this;this.i=new Mt(function(n,r){t.ondata(null,n,r)})}return t.prototype.push=function(t,n){try{this.i.push(t,n)}catch(t){this.ondata(t,null,n)}},t.compression=8,t}();_e.UnzipInflate=mn;var bn=function(){function t(t,n){var r=this;n<32e4?this.i=new Mt(function(t,n){r.ondata(null,t,n)}):(this.i=new St(function(t,n,i){r.ondata(t,n,i)}),this.terminate=this.i.terminate)}return t.prototype.push=function(t,n){this.i.terminate&&(t=D(t,0)),this.i.push(t,n)},t.compression=8,t}();_e.AsyncUnzipInflate=bn;var wn=function(){function t(t){this.onfile=t,this.k=[],this.o={0:yn},this.p=j}return t.prototype.push=function(t,r){var i=this;if(this.onfile||I(5),this.p||I(4),this.c>0){var e=Math.min(this.c,t.length),o=t.subarray(0,e);if(this.c-=e,this.d?this.d.push(o,!this.c):this.k[0].push(o),(t=t.subarray(e)).length)return this.push(t,r)}else{var s=0,a=0,u=void 0,h=void 0;this.p.length?t.length?((h=new n(this.p.length+t.length)).set(this.p),h.set(t,this.p.length)):h=this.p:h=t;for(var f=h.length,c=this.c,l=c&&this.d,p=function(){var t=ft(h,a);if(67324752==t){s=1,u=a,v.d=null,v.c=0;var n=ht(h,a+6),r=ht(h,a+8),e=2048&n,o=8&n,l=ht(h,a+26),p=ht(h,a+28);if(f>a+30+l+p){var d=[];v.k.unshift(d),s=2;var g,y=ft(h,a+18),m=ft(h,a+22),b=rn(h.subarray(a+30,a+=30+l),!e),w=an(h,a,p,2,y,m,0),x=w[0],z=w[1];o&&(x=-1-w[3]),a+=p,v.c=x;var k={name:b,compression:r,start:function(){if(k.ondata||I(5),x){var t=i.o[r];t||k.ondata(I(14,"unknown compression type "+r,1),null,!1),(g=x<0?new t(b):new t(b,x,z)).ondata=function(t,n,r){k.ondata(t,n,r)};for(var n=0,e=d;n<e.length;n++)g.push(e[n],!1);i.k[0]==d&&i.c?i.d=g:g.push(j,!0)}else k.ondata(null,j,!0)},terminate:function(){g&&g.terminate&&g.terminate()}};x>=0&&(k.size=x,k.originalSize=z),v.onfile(k)}return"break"}if(c){if(134695760==t)return u=a+=12+(-2==c&&8),s=3,v.c=0,"break";if(33639248==t)return u=a-=4,s=3,v.c=0,"break"}},v=this;a<f-4&&"break"!==p();++a);if(this.p=j,c<0){var d=h.subarray(0,s?u-12-(-2==c&&8)-(134695760==ft(h,u-16)&&4):a);l?l.push(d,!!s):this.k[+(2==s)].push(d)}if(2&s)return this.push(h.subarray(a),r);this.p=h.subarray(a)}r&&(this.c&&I(13),this.p=null)},t.prototype.register=function(t){this.o[t.compression]=t},t}();_e.Unzip=wn;var xn="function"==typeof queueMicrotask?queueMicrotask:"function"==typeof setTimeout?setTimeout:function(t){t()};function zn(t,r,i){i||(i=r,r={}),"function"!=typeof i&&I(7);var e=[],o=function(){for(var t=0;t<e.length;++t)e[t]()},s={},a=function(t,n){xn(function(){i(t,n)})};xn(function(){a=i});for(var u=t.length-22;101010256!=ft(t,u);--u)if(!u||t.length-u>65558)return a(I(13,0,1),null),o;var h=ht(t,u+8);if(h){var f=h,c=ft(t,u+16),l=117853008==ft(t,u-20);if(l){var p=ft(t,u-12);(l=101075792==ft(t,p))&&(f=h=ft(t,p+32),c=ft(t,p+48))}for(var v=r&&r.filter,d=function(r){var i=sn(t,c,l),u=i[0],f=i[1],p=i[2],d=i[3],g=i[4],y=on(t,i[5]);c=g;var m=function(t,n){t?(o(),a(t,null)):(n&&(s[d]=n),--h||a(null,s))};if(!v||v({name:d,size:f,originalSize:p,compression:u}))if(u)if(8==u){var b=t.subarray(y,y+f);if(p<524288||f>.8*p)try{m(null,Tt(b,{out:new n(p)}))}catch(t){m(t,null)}else e.push(At(b,{size:p},m))}else m(I(14,"unknown compression type "+u,1),null);else m(null,D(t,y,y+f));else m(null,null)},g=0;g<f;++g)d()}else a(null,{});return o}function kn(t,r){for(var i={},e=t.length-22;101010256!=ft(t,e);--e)(!e||t.length-e>65558)&&I(13);var o=ht(t,e+8);if(!o)return{};var s=ft(t,e+16),a=117853008==ft(t,e-20);if(a){var u=ft(t,e-12);(a=101075792==ft(t,u))&&(o=ft(t,u+32),s=ft(t,u+48))}for(var h=r&&r.filter,f=0;f<o;++f){var c=sn(t,s,a),l=c[0],p=c[1],v=c[2],d=c[3],g=c[4],y=on(t,c[5]);s=g,h&&!h({name:d,size:p,originalSize:v,compression:l})||(l?8==l?i[d]=Tt(t.subarray(y,y+p),{out:new n(v)}):I(14,"unknown compression type "+l):i[d]=D(t,y,y+p))}return i}return _e});
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.14.2/sql-wasm.js" integrity="sha512-G5E7whKQSPtDMO2K5CnlFdy518Z28CydpBURC+gT5JtOa+hMFMG0JhZUHgs+b7N4sbEOz2j0NfFQWmHVos5nUQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+window.SQL_CONFIG = {locateFile: f => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.14.2/' + f};
+window.SQL_SOURCE_NOTE = '这一份从 cdnjs 取 sql.js，看起来没取到——多半是网络不通或者被拦截了。web-single 分支的单文件版本可以完全离线使用。';
+</script>
+
+<script>
+"use strict";
+/* ===========================================================================
+   Ported from venera2picacomic.py / verify.py / simulate_import.py.
+   Every constant below mirrors a value read out of PicaComic's own source.
+   =========================================================================== */
+
+// Venera stores sourceKey.hashCode; PicaComic uses small fixed values for its
+// built-ins. Its two enums disagree at nhentai, so favourites need their own map:
+// FavoriteType resolves through ComicType.values[key], whose index 5 is
+// htFavorite, and ComicSource.find("htfavorite")! then throws.
+const HISTORY_TYPE = {553570794:0, 385625716:1, 769844263:2, 258019538:3, 823512256:4, 264196719:5};
+const FAVORITE_TYPE = Object.assign({}, HISTORY_TYPE, {264196719:6});
+const TYPE_NAMES = {553570794:'picacg', 385625716:'ehentai', 769844263:'jm',
+  264196719:'nhentai', 557997769:'copy_manga', 981441865:'ManHuaGui',
+  577718694:'manga_dex', 233488852:'baozi', 823512256:'wnacg', 258019538:'hitomi'};
+const COMIC_TYPE = ['picacg','ehentai','jm','hitomi','htManga','htFavorite','nhentai','other'];
+const BUILT_IN = new Set(['picacg','ehentai','jm','hitomi','htmanga','nhentai']);
+const HISTORY_NAMES = ['picacg','ehentai','jm','hitomi','htmanga','nhentai'];
+// io_tools.dart: directories the importer expects. Anything else at the top
+// level is renamed to `download`, which then wipes the real download folder.
+const KNOWN_DIRS = new Set(['comic_source','local_add_comic','chapter_comments',
+  'comic_comments','download']);
+
+const HISTORY_DDL = `create table history (
+  target text primary key, title text, subtitle text, cover text, time int,
+  type int, ep int, page int, readEpisode text, max_page int)`;
+const IMAGE_FAV_DDL = `create table image_favorites (
+  id TEXT, title TEXT NOT NULL, cover TEXT NOT NULL, ep INTEGER NOT NULL,
+  page INTEGER NOT NULL, other TEXT NOT NULL, PRIMARY KEY (id, ep, page))`;
+const folderDdl = name => `create table ${name} (
+  target text, name TEXT, author TEXT, type int, tags TEXT, cover_path TEXT,
+  time TEXT, last_update_time TEXT DEFAULT NULL,
+  has_new_update INTEGER DEFAULT 0, last_check_time INTEGER DEFAULT NULL,
+  display_order int, primary key (target, type))`;
+const HISTORY_COLS = ['target','title','subtitle','cover','time','type','ep','page','readEpisode','max_page'];
+const IMAGE_FAV_COLS = ['id','title','cover','ep','page','other'];
+const FOLDER_COLS = ['target','name','author','type','tags','cover_path','time',
+  'last_update_time','has_new_update','last_check_time','display_order'];
+// settings/firstUse must exist but may be empty: the copy loops are bounded by
+// the minimum of both lists, and the version probe is elementAtOrNull(46) ?? "1".
+const APPDATA = {settings:[], firstUse:[], blockingKeywords:[], favoriteTags:[]};
+
+/* ---- small helpers, matching the Python semantics exactly ---- */
+class Fault extends Error{ constructor(title, body){ super(title); this.title=title; this.body=body; } }
+const q = n => '"' + String(n).replace(/"/g,'""') + '"';
+const fixUrl = u => (typeof u === 'string' && u.startsWith('//')) ? 'https:' + u : u;
+const txt = v => (v === null || v === undefined) ? '' : v;
+const nnum = (v, d=0) => (v === null || v === undefined) ? d : v;
+const digits = s => /^\d+$/.test(s);
+const same = (a, b) => a.length === b.length && a.every((v,i) => v === b[i]);
+const esc = s => String(s).replace(/[&<>"]/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// PicaComic parses this column with int.parse; Venera writes "group-chapter"
+// for sources that have chapter groups, which would abort the whole merge.
+function cleanReadEpisode(value){
+  const out = [];
+  for (let part of String(value || '').split(',')){
+    part = part.trim();
+    const token = digits(part) ? part : part.split('-').pop().trim();
+    if (digits(token) && !out.includes(token)) out.push(token);
+  }
+  return out.join(',');
+}
+
+/* ---- sql.js conveniences ---- */
+function* rows(db, sql){
+  const st = db.prepare(sql);
+  try { while (st.step()) yield st.getAsObject(); } finally { st.free(); }
+}
+function colNames(db, table){
+  const r = db.exec(`pragma table_info(${table})`);
+  return r.length ? r[0].values.map(v => v[1]) : [];
+}
+function tableNames(db){
+  const r = db.exec("select name from sqlite_master where type='table'");
+  return r.length ? r[0].values.map(v => v[0]) : [];
+}
+function scalar(db, sql){
+  const r = db.exec(sql);
+  return (r.length && r[0].values.length) ? r[0].values[0][0] : null;
+}
+
+/* ===========================================================================
+   convert -- the port of venera2picacomic.py
+   =========================================================================== */
+function convert(SQL, venBytes, baseBytes){
+  let zin;
+  try { zin = fflate.unzipSync(venBytes); }
+  catch(e){ throw new Fault('这个文件不是有效的 zip 包',
+    'Venera 的导出文件本质上是一个 zip。如果它是从聊天软件或网盘里下载的，先确认下载完整、没有被改名或二次压缩。'); }
+  const need = name => {
+    const b = zin[name];
+    if (!b || !b.length) throw new Fault(`包里没有 ${name}`,
+      '确认这是 Venera 里「设置 → 数据 → 导出」生成的 .venera 文件。单独导出的漫画源或阅读记录不含数据库。');
+    return b;
+  };
+
+  const stats = {history:0, comics:0, folders:[], hisBy:{}, favBy:{}, unmapped:new Set(),
+                 baseUsed:!!baseBytes, baseAppdata:false};
+
+  /* ---- history.db ---- */
+  const hOut = new SQL.Database();
+  hOut.run(HISTORY_DDL);
+  hOut.run(IMAGE_FAV_DDL);
+  const hIn = new SQL.Database(need('history.db'));
+  if (!tableNames(hIn).includes('history')) throw new Fault('history.db 里没有 history 表',
+    '这个包的结构和 Venera 的导出不一致。如果它来自很旧或很新的 Venera 版本，请告诉我版本号。');
+  hOut.run('begin');
+  const hIns = hOut.prepare('insert or replace into history (target, title, subtitle,'
+    + ' cover, time, type, ep, page, readEpisode, max_page) values (?,?,?,?,?,?,?,?,?,?)');
+  for (const r of rows(hIn, 'select * from history order by time asc')){
+    const t = r.type;
+    let mapped = HISTORY_TYPE[t];
+    if (mapped === undefined){ mapped = t; stats.unmapped.add(t); }
+    stats.hisBy[t] = (stats.hisBy[t] || 0) + 1;
+    hIns.run([r.id, txt(r.title), txt(r.subtitle), txt(fixUrl(r.cover)), nnum(r.time),
+              mapped, nnum(r.ep), nnum(r.page), cleanReadEpisode(r.readEpisode),
+              nnum(r.max_page)]);
+    stats.history++;
+  }
+  hIns.free();
+  hOut.run('commit');
+  const historyBytes = hOut.export();
+  hOut.close(); hIn.close();
+
+  /* ---- local_favorite.db ---- */
+  const fOut = new SQL.Database();
+  fOut.run('create table folder_sync (folder_name text primary key, time TEXT,'
+    + ' key TEXT, sync_data TEXT)');
+  fOut.run('create table folder_order (folder_name text primary key, order_value int)');
+  const fIn = new SQL.Database(need('local_favorite.db'));
+  const order = {};
+  for (const r of rows(fIn, 'select folder_name, order_value from folder_order'))
+    order[r.folder_name] = r.order_value;
+  const folders = tableNames(fIn).filter(t => t !== 'folder_order' && t !== 'folder_sync');
+  if (!folders.length) throw new Fault('这个包里没有收藏夹',
+    'local_favorite.db 里除了 folder_order / folder_sync 之外没有别的表，说明导出时收藏是空的。');
+  // Venera leaves folders it never reordered out of folder_order; give them
+  // values after the last known one so no two folders collide.
+  const known = Object.values(order);
+  let next = known.length ? Math.max.apply(null, known) + 1 : 0;
+  const resolved = {};
+  for (const f of folders) resolved[f] = (f in order) ? order[f] : next++;
+  folders.sort((a, b) => resolved[a] - resolved[b]);
+  fOut.run('begin');
+  for (const folder of folders){
+    fOut.run(folderDdl(q(folder)));
+    const c = new Set(colNames(fIn, q(folder)));
+    const ins = fOut.prepare('insert or replace into ' + q(folder) + ' (target, name,'
+      + ' author, type, tags, cover_path, time, last_update_time, has_new_update,'
+      + ' last_check_time, display_order) values (?,?,?,?,?,?,?,?,?,?,?)');
+    let n = 0;
+    for (const r of rows(fIn, 'select * from ' + q(folder) + ' order by display_order asc')){
+      const t = r.type;
+      let mapped = FAVORITE_TYPE[t];
+      if (mapped === undefined){ mapped = t; stats.unmapped.add(t); }
+      stats.favBy[t] = (stats.favBy[t] || 0) + 1;
+      n++;
+      ins.run([r.id, txt(r.name), txt(r.author), mapped, txt(r.tags),
+               txt(fixUrl(r.cover_path)), txt(r.time),
+               c.has('last_update_time') ? nnum(r.last_update_time, null) : null,
+               c.has('has_new_update') ? nnum(r.has_new_update) : 0,
+               c.has('last_check_time') ? nnum(r.last_check_time, null) : null,
+               n]);
+    }
+    ins.free();
+    fOut.run('insert or replace into folder_order (folder_name, order_value)'
+      + ' values (?,?)', [folder, resolved[folder]]);
+    stats.folders.push({name:folder, count:n, order:resolved[folder]});
+    stats.comics += n;
+  }
+  fOut.run('commit');
+  const favBytes = fOut.export();
+  fOut.close(); fIn.close();
+
+  /* ---- pack ---- */
+  const files = {};
+  if (baseBytes){
+    let zb;
+    try { zb = fflate.unzipSync(baseBytes); }
+    catch(e){ throw new Fault('PicaComic 那份备份不是有效的 zip 包',
+      '请重新在 PicaComic 里「设置 → 备份与恢复 → 导出数据」导一份。'); }
+    for (const name of Object.keys(zb)){
+      if (name === 'local_favorite.db' || name === 'history.db') continue;
+      if (name.endsWith('/')) continue;
+      files[name] = zb[name];
+    }
+    stats.baseAppdata = Object.prototype.hasOwnProperty.call(zb, 'appdata');
+  } else {
+    files['appdata'] = fflate.strToU8(JSON.stringify(APPDATA));
+  }
+  files['local_favorite.db'] = favBytes;
+  files['history.db'] = historyBytes;
+  return {stats, files, bytes: fflate.zipSync(files, {level:6})};
+}
+
+/* ===========================================================================
+   verify -- the port of verify.py. Every claim maps to something the importer
+   actually does, so a failure means the import misbehaves, not merely looks odd.
+   =========================================================================== */
+function verify(SQL, out){
+  const C = [];
+  const add = (ok, claim, why) => C.push({ok: !!ok, claim, why});
+  const names = Object.keys(out.files);
+
+  add(names.includes('appdata'), 'appdata 条目存在',
+    '<code>importData</code> 读不到它会直接抛异常，整个导入失败。');
+  add(names.includes('local_favorite.db'), 'local_favorite.db 存在',
+    '导入器复制这个文件时没有做存在性判断。');
+  add(names.includes('history.db'), 'history.db 存在',
+    '缺了不会报错，但阅读历史不会被合并。');
+
+  const stray = [...new Set(names.filter(n => n.includes('/')).map(n => n.split('/')[0]))]
+    .filter(d => !KNOWN_DIRS.has(d));
+  add(stray.length === 0, '没有多余的顶层目录',
+    '<code>_flattenExtractedRoot</code> 会把不认识的顶层目录改名成 <code>download</code>，'
+    + '接着清空你真正的下载目录。' + (stray.length ? ' 发现：' + esc(stray.join('、')) : ''));
+
+  let roundtrip = true;
+  try {
+    const back = fflate.unzipSync(out.bytes);
+    for (const k of names){
+      const a = out.files[k], b = back[k];
+      if (!b || b.length !== a.length){ roundtrip = false; break; }
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]){ roundtrip = false; break; }
+      if (!roundtrip) break;
+    }
+  } catch(e){ roundtrip = false; }
+  add(roundtrip, '重新解包后与写入内容逐字节一致',
+    '导入器用 <code>ZipDecoder().decodeBytes(bytes, verify: true)</code> 解包，CRC 不对整包就废了。');
+
+  const app = JSON.parse(fflate.strFromU8(out.files['appdata']));
+  add(Array.isArray(app.settings), 'appdata.settings 是数组',
+    '它要过 <code>List&lt;String&gt;.from</code>，遇到 null 会抛异常。');
+  add(Array.isArray(app.firstUse), 'appdata.firstUse 是数组', '同上，也没有 null 兜底。');
+  if (out.stats.baseUsed){
+    add(app.settings.length < 47 || digits(String(app.settings[46])),
+      '版本探测位（settings[46]）是数字或不存在',
+      '导入器读 <code>int.parse(settings.elementAtOrNull(46) ?? "1")</code>，非数字会抛异常。');
+    add(true, '沿用你自己那份 appdata',
+      '设置、屏蔽词、收藏标签会恢复成你导出 PicaComic 备份时的状态——这是你选了第二个文件的预期结果。');
+  } else {
+    add(app.settings.length === 0, 'settings 为空，你的设置一项都不会被覆盖',
+      '<code>readDataFromJson</code> 的拷贝循环写作 <code>i &lt; settings.length &amp;&amp; i &lt; newSettings.length</code>，取两边最小值，空数组拷不过去任何东西。');
+    add(app.firstUse.length === 0, 'firstUse 为空，同样不覆盖', '循环写法与 settings 相同。');
+  }
+  for (const k of ['blockingKeywords','favoriteTags'])
+    add(Array.isArray(app[k]), `appdata.${k} 是数组`, '这两个字段本身有 <code>?? []</code> 兜底，给数组最省事。');
+  add(app.history === undefined || app.history === null, 'appdata 里没有 history 键',
+    '带上它会重写 PicaComic 的历史管理器状态。');
+
+  /* ---- history.db ---- */
+  const h = new SQL.Database(out.files['history.db']);
+  add(same(colNames(h, 'history'), HISTORY_COLS), 'history 表的列与 PicaComic 完全一致',
+    '合并是按列名读的，列名对不上就取不到值。');
+  add(same(colNames(h, 'image_favorites'), IMAGE_FAV_COLS),
+    'image_favorites 空表存在，且列名正确',
+    '合并历史之后 PicaComic 会无 try/catch 地 <code>select * from image_favorites</code>，表不存在就抛异常。');
+
+  const bad = [];
+  for (const r of rows(h, 'select readEpisode from history'))
+    if (!/^(\d+(,\d+)*)?$/.test(r.readEpisode === null ? '' : String(r.readEpisode)))
+      bad.push(r.readEpisode);
+  add(bad.length === 0, '每一行 readEpisode 都能被 int.parse 解析',
+    'Venera 对有章节分组的源写成 <code>"1-1"</code>；PicaComic 逐项 <code>int.parse</code>，'
+    + '一行坏数据会中断整个历史合并。' + (bad.length ? ' 发现：' + esc(bad.slice(0,5).join(' / ')) : ''));
+  add(scalar(h, 'select count(*) from history where title is null or cover is null'
+    + ' or ep is null or page is null or time is null or max_page is null'
+    + ' or subtitle is null') === 0, '读取时会被强制转型的列都不为 null',
+    'Dart 侧直接 <code>as String</code> / <code>as int</code>，null 会抛类型错误。');
+  const badType = scalar(h, "select count(*) from history where typeof(time) <> 'integer'"
+    + " or typeof(ep) <> 'integer' or typeof(page) <> 'integer'"
+    + " or typeof(max_page) <> 'integer' or typeof(type) <> 'integer'");
+  add(badType === 0, 'time / ep / page / max_page / type 全部存成整数',
+    'Dart 按 <code>int</code> 取这些列，存成浮点数会抛类型错误。');
+
+  const htypes = {};
+  for (const r of rows(h, 'select type, count(*) as n from history group by type'))
+    htypes[r.type] = r.n;
+  const hOutOfRange = Object.keys(htypes).map(Number).filter(t => t >= 6 && t <= 7);
+  add(hOutOfRange.length === 0, '没有 6..7 之间的历史 type',
+    '<code>HistoryType</code> 只给 0..5 命名，更高的值会当作 JS 源的 key 哈希去查。'
+    + (hOutOfRange.length ? ' 发现：' + hOutOfRange.join('、') : ''));
+  h.close();
+
+  /* ---- local_favorite.db ---- */
+  const f = new SQL.Database(out.files['local_favorite.db']);
+  const tabs = tableNames(f);
+  add(tabs.includes('folder_order'), 'folder_order 表存在',
+    '收藏夹的排列顺序从这里读；缺了顺序会退化成 0。');
+  add(same(colNames(f, 'folder_sync'), ['folder_name','time','key','sync_data']),
+    'folder_sync 表存在，列名正确', '导入器会连带读它，表结构必须对得上。');
+  let layoutOk = true, nullOk = true, total = 0;
+  const ftypes = {};
+  for (const t of tabs){
+    if (t === 'folder_order' || t === 'folder_sync') continue;
+    if (!same(colNames(f, q(t)), FOLDER_COLS)) layoutOk = false;
+    total += scalar(f, 'select count(*) from ' + q(t));
+    if (scalar(f, 'select count(*) from ' + q(t) + ' where target is null or name is null'
+      + ' or author is null or tags is null or cover_path is null or time is null')) nullOk = false;
+    for (const r of rows(f, 'select type, count(*) as n from ' + q(t) + ' group by type'))
+      ftypes[r.type] = (ftypes[r.type] || 0) + r.n;
+  }
+  add(layoutOk, '每个收藏夹表都是 PicaComic 的列结构', '同样是按列名读的。');
+  add(nullOk, '收藏行里会被强制转型的列都不为 null', '<code>FavoriteItem.fromRow</code> 直接 <code>as String</code>。');
+  const unresolvable = Object.keys(ftypes).map(Number)
+    .filter(t => t >= 0 && t <= 6 && !BUILT_IN.has(COMIC_TYPE[t].toLowerCase()));
+  add(unresolvable.length === 0, '没有一条收藏的 type 会解析到不存在的内置源',
+    'type 5 会被 <code>ComicType.values[5]</code> 认成 <code>htFavorite</code>，'
+    + '接着 <code>ComicSource.find("htfavorite")!</code> 的非空断言直接抛异常——'
+    + '列表里能正常显示，点开才炸。'
+    + (unresolvable.length ? ' 发现：' + unresolvable.map(t => `${t} → ${COMIC_TYPE[t]}`).join('、') : ''));
+  const ords = [];
+  for (const r of rows(f, 'select folder_name, order_value from folder_order order by order_value'))
+    ords.push(r.order_value);
+  add(new Set(ords).size === ords.length, 'folder_order 的值互不重复',
+    '重复的顺序值会让收藏夹在列表里的排列变得不确定。');
+  f.close();
+  return {checks: C, htypes, ftypes, total};
+}
+
+/* ===========================================================================
+   simulateImport -- the port of simulate_import.py. Replays
+   Appdata.readDataFromJson, LocalFavoritesManager.readData and
+   HistoryManager.tryUpdateDb with the same SQL, column names and int.parse
+   strictness, so a row that would throw in the app fails here instead.
+   =========================================================================== */
+function simulateImport(SQL, out){
+  const problems = [];
+  const r = {folders:0, added:0, skipped:0, jsRows:0, history:0, images:0,
+             settingsSafe:null, fileVersion:1, problems};
+
+  /* ---- Appdata.readDataFromJson ---- */
+  const app = JSON.parse(fflate.strFromU8(out.files['appdata']));
+  r.fileVersion = parseInt(app.settings.length > 46 ? String(app.settings[46]) : '1', 10);
+  const newSettings = app.settings.map(String);
+  const newFirst = app.firstUse.map(String);
+  if (!out.stats.baseUsed){
+    const local = Array.from({length:105}, (_, i) => 'user-value-' + i);
+    const before = local.slice();
+    for (let i = 0; i < Math.min(local.length, newSettings.length); i++) local[i] = newSettings[i];
+    const first = ['1','1','1','1','1'], firstBefore = first.slice();
+    for (let i = 0; i < Math.min(first.length, newFirst.length); i++) first[i] = newFirst[i];
+    r.settingsSafe = same(local, before) && same(first, firstBefore);
+    if (!r.settingsSafe) problems.push('导入会覆盖你已有的设置');
+  }
+
+  /* ---- LocalFavoritesManager.readData ---- */
+  const dest = new SQL.Database();
+  dest.run('create table folder_sync (folder_name text primary key, time TEXT, key TEXT, sync_data TEXT)');
+  dest.run('create table folder_order (folder_name text primary key, order_value int)');
+  const src = new SQL.Database(out.files['local_favorite.db']);
+  const folders = tableNames(src).filter(t => t !== 'folder_sync' && t !== 'folder_order');
+  const order = {};
+  const ost = src.prepare('select * from folder_order where folder_name == ?');
+  for (const fo of folders){
+    ost.bind([fo]);
+    order[fo] = ost.step() ? ost.getAsObject().order_value : 0;
+    ost.reset();
+  }
+  ost.free();
+  folders.sort((a, b) => order[a] - order[b]);
+
+  const items = [];
+  for (const fo of folders)
+    for (const row of rows(src, 'select * from ' + q(fo) + ';'))
+      items.push({folder: fo, target: row.target, type: Number(row.type),
+        name: String(row.name), author: String(row.author),
+        tags: String(row.tags).split(',').filter(t => t !== ''),
+        coverPath: String(row.cover_path), time: String(row.time)});
+
+  const made = new Map();
+  dest.run('begin');
+  for (const it of items){
+    const key = it.type;
+    if (key >= 0 && key <= 6){
+      const label = COMIC_TYPE[key];
+      if (!BUILT_IN.has(label.toLowerCase()))
+        problems.push(`收藏 ${it.target} 的 type 是 ${key}，解析成 ${label}，`
+          + `ComicSource.find("${label.toLowerCase()}")! 会抛异常`);
+    } else r.jsRows++;
+    if (!made.has(it.folder)){
+      if (it.folder === '') problems.push('收藏夹名为空，createFolder 会抛 "name is empty!"');
+      dest.run(folderDdl(q(it.folder)));
+      made.set(it.folder, {
+        dup: dest.prepare('select 1 from ' + q(it.folder) + ' where target == ? and type == ?'),
+        ins: dest.prepare('insert into ' + q(it.folder) + ' (target, name, author, type,'
+          + ' tags, cover_path, time, display_order) values (?,?,?,?,?,?,?,?)')
+      });
+    }
+    const st = made.get(it.folder);
+    st.dup.bind([it.target, key]);
+    const exists = st.dup.step();
+    st.dup.reset();
+    if (exists){ r.skipped++; continue; }
+    const mx = scalar(dest, 'select max(display_order) from ' + q(it.folder));
+    st.ins.run([it.target, it.name, it.author, key, it.tags.join(','), it.coverPath,
+                it.time, (mx || 0) + 1]);
+    r.added++;
+  }
+  dest.run('commit');
+  for (const st of made.values()){ st.dup.free(); st.ins.free(); }
+  r.folders = made.size;
+  dest.close(); src.close();
+
+  /* ---- HistoryManager.tryUpdateDb ---- */
+  const hdest = new SQL.Database();
+  hdest.run(HISTORY_DDL);
+  const hsrc = new SQL.Database(out.files['history.db']);
+  const seen = new Set();
+  hdest.run('begin');
+  const hins = hdest.prepare('insert into history (target, title, subtitle, cover, time,'
+    + ' type, ep, page, readEpisode, max_page) values (?,?,?,?,?,?,?,?,?,?)');
+  for (const row of rows(hsrc, 'select * from history order by time DESC;')){
+    const type = Number(row.type);
+    if (type >= 6 && type <= 7)
+      problems.push(`历史 ${row.target} 的 type 是 ${type}，HistoryType 无法命名`);
+    const eps = new Set();
+    for (const e of String(row.readEpisode).split(',')){
+      if (e === '') continue;
+      if (!/^[+-]?\d+$/.test(e)) problems.push(`历史 ${row.target} 的 readEpisode 含 "${e}"，int.parse 会抛异常`);
+      else eps.add(parseInt(e, 10));
+    }
+    if (seen.has(row.target)) continue;
+    seen.add(row.target);
+    hins.run([row.target, String(row.title), String(row.subtitle), String(row.cover),
+              Number(row.time), type, Number(row.ep), Number(row.page),
+              [...eps].sort((a, b) => a - b).join(','), Number(row.max_page)]);
+    r.history++;
+  }
+  hins.free();
+  hdest.run('commit');
+
+  // the select that runs right after the history merge, uncaught in PicaComic
+  for (const row of rows(hsrc, 'select * from image_favorites;')){
+    try { JSON.parse(row.other); }
+    catch(e){ problems.push(`image_favorites 的 other 字段不是合法 JSON：${row.id}`); }
+    r.images++;
+  }
+  hdest.close(); hsrc.close();
+  r.ok = problems.length === 0;
+  return r;
+}
+
+/* ===========================================================================
+   UI
+   =========================================================================== */
+const $ = id => document.getElementById(id);
+let sqlReady = null, venBytes = null, venName = '', baseBytes = null, current = null;
+
+const loadSql = () => (sqlReady
+  || (sqlReady = initEngine().catch(e => { sqlReady = null; throw e; })));
+
+/* Where sql.js comes from is the one thing the three packagings disagree on,
+   so let the VENDOR block above explain its own failure mode. Not caching the
+   rejection matters: without the .catch above, a second attempt after the
+   network came back would reject instantly from cache. */
+async function initEngine(){
+  try {
+    if (typeof initSqlJs !== 'function') throw new Error('sql.js 没有加载进来');
+    return await initSqlJs(window.SQL_CONFIG || {});
+  } catch (e){
+    throw new Fault('SQLite 引擎没能加载',
+      (e && e.message ? e.message + '。' : '') + (window.SQL_SOURCE_NOTE || ''));
+  }
+}
+const breathe = () => new Promise(r => setTimeout(r, 16));
+const fmt = n => n.toLocaleString('zh-CN');
+const size = b => b < 1024 * 1024 ? (b / 1024).toFixed(0) + ' KB'
+                                  : (b / 1024 / 1024).toFixed(2) + ' MB';
+
+function status(msg, tick){
+  $('status').innerHTML = msg ? (tick ? '<span class="tick">✓</span> ' : '') + esc(msg) : '';
+}
+function fail(title, body){
+  $('errTitle').textContent = title;
+  $('errBody').textContent = body;
+  $('err').hidden = false;
+  status('');
+}
+
+async function run(){
+  if (!venBytes) return;
+  $('err').hidden = true;
+  $('out').hidden = true;
+  $('drop').disabled = true;
+  try {
+    status('正在加载 SQLite 引擎');
+    const SQL = await loadSql();
+    status('正在重建 history.db 与 local_favorite.db');
+    await breathe();
+    const out = convert(SQL, venBytes, baseBytes);
+    status('正在按导入器的要求自检');
+    await breathe();
+    const v = verify(SQL, out);
+    status('正在模拟 PicaComic 的导入流程');
+    await breathe();
+    const sim = simulateImport(SQL, out);
+    current = {out, v, sim};
+    render(current);
+    status('转换完成', true);
+  } catch (e){
+    if (e instanceof Fault) fail(e.title, e.body);
+    else fail('转换中断：' + (e && e.message ? e.message : String(e)),
+      '这不是预期内的错误。可以把这个文件的来源和 Venera 版本发到仓库 issue 里——但请不要附带 .venera 本身，它包含你的登录信息。');
+    console.error(e);
+  } finally {
+    $('drop').disabled = false;
+  }
+}
+
+/* ---- file intake ---- */
+function accept(file){
+  if (!file) return;
+  venName = file.name;
+  $('dropTitle').textContent = file.name;
+  $('dropHint').textContent = size(file.size) + ' · 点击可换成别的文件';
+  file.arrayBuffer().then(buf => { venBytes = new Uint8Array(buf); run(); });
+}
+$('drop').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', e => accept(e.target.files[0]));
+$('base').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  $('basePicked').textContent = f.name;
+  $('basePicked').hidden = false;
+  f.arrayBuffer().then(buf => { baseBytes = new Uint8Array(buf); run(); });
+});
+['dragenter','dragover'].forEach(t => document.addEventListener(t, e => {
+  e.preventDefault(); $('drop').classList.add('over');
+}));
+['dragleave','drop'].forEach(t => document.addEventListener(t, e => {
+  e.preventDefault();
+  if (t === 'drop' || e.target === document.documentElement) $('drop').classList.remove('over');
+}));
+document.addEventListener('drop', e => accept(e.dataTransfer && e.dataTransfer.files[0]));
+
+/* ---- rendering ---- */
+function render(cur){
+  const {out, v, sim} = cur, s = out.stats;
+  $('cHistory').textContent = fmt(s.history);
+  $('cComics').textContent = fmt(s.comics);
+  $('cFolders').textContent = fmt(s.folders.length);
+  $('cSize').textContent = size(out.bytes.length);
+
+  /* source remapping -- the one table where the two enums visibly disagree */
+  const types = [...new Set(Object.keys(s.hisBy).concat(Object.keys(s.favBy)))].map(Number);
+  types.sort((a, b) => ((s.hisBy[b]||0) + (s.favBy[b]||0)) - ((s.hisBy[a]||0) + (s.favBy[a]||0)));
+  const tb = $('remap').tBodies[0];
+  tb.innerHTML = '';
+  let anySplit = false;
+  for (const t of types){
+    const h = HISTORY_TYPE[t], f = FAVORITE_TYPE[t], built = h !== undefined, split = built && h !== f;
+    if (split) anySplit = true;
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td class="hash">' + t + '</td>'
+      + '<td class="key">' + esc(TYPE_NAMES[t] || '未知源') + '</td>'
+      + '<td class="num">' + (s.hisBy[t] ? fmt(s.hisBy[t]) : '·') + '</td>'
+      + '<td class="num">' + (s.favBy[t] ? fmt(s.favBy[t]) : '·') + '</td>'
+      + '<td><span class="to">→</span> ' + (built
+          ? '<span class="' + (split ? 'split' : 'val') + '">'
+            + (split ? '历史 ' + h + ' / 收藏 ' + f : h) + '</span>'
+          : '<span class="val">原样保留</span>') + '</td>'
+      + '<td class="hash">' + (built ? (split ? '两个枚举在这里不一致' : '')
+                                     : 'JS 源，需装 key 相同的源') + '</td>';
+    tb.appendChild(tr);
+  }
+  $('remapNote').textContent = types.length + ' 个来源';
+  const foots = [];
+  if (anySplit) foots.push('nhentai 在历史里是 <code>5</code>、在收藏里是 <code>6</code>：'
+    + '收藏走 <code>ComicType.values[key]</code> 解析，而枚举第 5 位是 <code>htFavorite</code>。'
+    + '写成 5 的收藏在列表里能显示，点开才会抛异常。');
+  if (s.unmapped.size) foots.push('「原样保留」的是 JS 源，编号继续用 Venera 的 key 哈希。'
+    + '条目会进到 PicaComic 里，但要装上 <strong>key 完全相同</strong>的源才能打开——'
+    + 'Venera 的源脚本 API 不兼容，没有一起带过来。');
+  $('remapFoot').innerHTML = foots.join('<br><br>');
+  $('remapFoot').hidden = !foots.length;
+
+  /* folders, in the order PicaComic will show them */
+  const fb = $('folders').tBodies[0];
+  fb.innerHTML = '';
+  for (const f of s.folders){
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td class="num hash">' + f.order + '</td>'
+      + '<td class="name">' + esc(f.name) + '</td>'
+      + '<td class="num val">' + fmt(f.count) + '</td>';
+    fb.appendChild(tr);
+  }
+  $('folderNote').textContent = s.folders.length + ' 个 · 共 ' + fmt(s.comics) + ' 本';
+
+  renderLedger(v, sim);
+  renderDownload(cur);
+  $('out').hidden = false;
+}
+
+function renderLedger(v, sim){
+  const ul = $('ledger');
+  ul.innerHTML = '';
+  v.checks.forEach((c, i) => {
+    const li = document.createElement('li');
+    li.className = c.ok ? 'ok' : 'no';
+    li.style.animationDelay = (i * 32) + 'ms';
+    li.innerHTML = '<span class="mark">' + (c.ok ? '✓' : '✕') + '</span>'
+      + '<span class="claim">' + esc(c.claim) + '</span>'
+      + '<span class="why">' + c.why + '</span>';
+    ul.appendChild(li);
+  });
+  const bad = v.checks.filter(c => !c.ok).length;
+  const note = $('ledgerNote');
+  note.textContent = bad ? (v.checks.length - bad) + ' 项通过 · ' + bad + ' 项失败'
+                         : v.checks.length + ' 项全部通过';
+  note.style.color = bad ? 'var(--alarm)' : 'var(--pica)';
+
+  const line = (k, val) => '<b>' + k + '</b> <span class="v">' + val + '</span>';
+  let html = '<span class="head">模拟导入</span>'
+    + line('收藏夹', sim.folders + ' 个') + '　'
+    + line('写入', fmt(sim.added) + ' 本') + '　'
+    + line('跳过重复', sim.skipped) + '　'
+    + line('JS 源条目', sim.jsRows) + '<br>'
+    + line('历史合并', fmt(sim.history) + ' 条') + '　'
+    + line('图片收藏', sim.images) + '　'
+    + line('appdata 版本位', sim.fileVersion);
+  if (sim.settingsSafe === true) html += '<br>' + line('你的设置', '逐项比对后未被改动');
+  if (sim.ok) html += '<br><span style="color:var(--pica)">✓ 全流程无异常</span>';
+  else html += '<br>' + sim.problems.slice(0, 8).map(p =>
+    '<span style="color:var(--alarm)">✕ ' + esc(p) + '</span>').join('<br>')
+    + (sim.problems.length > 8 ? '<br><b>还有 ' + (sim.problems.length - 8) + ' 条</b>' : '');
+  $('replay').innerHTML = html;
+}
+
+function renderDownload(cur){
+  const {out, v, sim} = cur;
+  const clean = v.checks.every(c => c.ok) && sim.ok;
+  const name = (venName.replace(/\.[^.]*$/, '') || 'venera') + '.picadata';
+  const btn = $('dl');
+  btn.className = 'dl' + (clean ? '' : ' blocked');
+  btn.textContent = clean ? '下载 ' + name : '自检未通过 · 仍然下载 ' + name;
+  btn.onclick = () => {
+    const url = URL.createObjectURL(new Blob([out.bytes], {type: 'application/octet-stream'}));
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+  $('after').innerHTML = clean
+    ? '在 PicaComic 里走 <code>设置 → 备份与恢复 → 导入数据</code>，选这个文件。'
+      + '导入是<strong>增量合并</strong>：已有的收藏和历史不会被清掉，同一本重复的会自动跳过。'
+      + (out.stats.baseUsed ? '' : '<br>登录状态没有迁移，picacg / 禁漫需要重新登录。')
+    : '<em>上面有失败项，这个文件很可能会让导入出错或写坏数据。</em>'
+      + '先看失败项说明；如果你确认能接受，再下载。';
+}
+</script>
+</body>
+</html>
+
