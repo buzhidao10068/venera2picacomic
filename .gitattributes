@@ -1,0 +1,6 @@
+# The vendored libraries must stay byte-exact: web/build.py checks their
+# sha256, and the CDN branch pins the same bytes with subresource integrity.
+# Newline conversion on checkout would break both.
+web/fflate.min.js -text
+web/sql-wasm.js   -text
+web/sql-wasm.wasm binary
