@@ -11,6 +11,21 @@
 > `verify.py` 与 `simulate_import.py` 交叉验证；但它没有经过人工逐行审阅，
 > 使用前请自行 review，涉及你自己数据的操作请务必先备份。
 
+## 网页版
+
+同一个转换器有一份浏览器版本，纯前端、不需要装 Python，转换和自检都在页面里完成，
+文件不会离开你的设备。按打包方式分三个分支，功能完全一致，只是依赖来源不同：
+
+| 分支 | 形态 | 体积 | 适合 |
+|---|---|---|---|
+| [`web-single`](../../tree/web-single) | 单个 `index.html`，wasm 内联 | 983 KB | **推荐**。存到本地双击就能用，断网可用 |
+| [`web-vendored`](../../tree/web-vendored) | `web/` 目录 + 随仓库存放的 sql.js | 47 KB + 721 KB | 部署到静态托管，浏览器可分别缓存 |
+| [`web-cdn`](../../tree/web-cdn) | 单个 `index.html` + 从 cdnjs 取 sql.js | 80 KB | 仓库最小；代价是必须联网，且 cdnjs 未必能访问 |
+
+每个分支的 README 里有对应的部署步骤。三份 `index.html` 的页面与转换逻辑逐字节
+相同，只有 `<!-- VENDOR -->` 那一段不一样，由 `web-vendored` 分支的
+`web/build.py` 生成。
+
 ## 用法
 
 ```bash
@@ -35,6 +50,17 @@ python simulate_import.py out.picadata # 用同样的 SQL 重放一遍导入流�
 
 `simulate_import.py` 会按 `FavoriteType.comicSource` / `HistoryType.name` 的解析
 路径把每一行的来源解一遍，任何在 App 里会抛异常的行会在这里先失败。
+
+不想拿自己的库当试验品，可以先生成一份合成样本——里面没有任何真实数据，但刻意
+覆盖了曾经出问题的分支（`"1-1"` 形式的章节进度、nhentai 的枚举错位、JS 源哈希、
+协议相对的封面地址、NULL、缺 `folder_order` 记录的夹子、带引号和 emoji 的夹子名、
+少了可选列的旧版夹子表）：
+
+```bash
+python make_fixture.py fixture.venera
+python venera2picacomic.py fixture.venera fixture.picadata
+python verify.py fixture.picadata && python simulate_import.py fixture.picadata
+```
 
 ## 迁移范围
 

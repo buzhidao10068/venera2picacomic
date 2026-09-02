@@ -8,6 +8,12 @@ failure here means the import would misbehave rather than merely look odd.
 """
 import json, re, sqlite3, sys, tempfile, zipfile, os
 
+# folder names can hold emoji; a legacy Windows console codepage cannot encode
+# them, and printing the folder list must not be what fails the check run
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(errors='replace')
+
 # lib/foundation/def.dart -- enum ComicType, in declaration order
 COMIC_TYPE = ['picacg', 'ehentai', 'jm', 'hitomi', 'htManga', 'htFavorite',
               'nhentai', 'other']
@@ -17,6 +23,12 @@ BUILT_IN = {'picacg', 'ehentai', 'jm', 'hitomi', 'htmanga', 'nhentai'}
 HISTORY_NAMES = ['picacg', 'ehentai', 'jm', 'hitomi', 'htmanga', 'nhentai']
 
 ok = True
+
+
+def quote(name):
+    """Folder names become table names verbatim, and PicaComic's createFolder
+    only rejects empty and duplicate names -- so a name may contain a quote."""
+    return '"' + name.replace('"', '""') + '"'
 
 
 def check(label, cond, detail=''):
@@ -95,14 +107,14 @@ total, layout_ok, null_ok, ftypes = 0, True, True, {}
 for t in tables:
     if t in ('folder_order', 'folder_sync'):
         continue
-    layout_ok = layout_ok and [c[1] for c in f.execute('pragma table_info("%s")' % t)] == [
+    layout_ok = layout_ok and [c[1] for c in f.execute('pragma table_info(%s)' % quote(t))] == [
         'target', 'name', 'author', 'type', 'tags', 'cover_path', 'time',
         'last_update_time', 'has_new_update', 'last_check_time', 'display_order']
-    total += f.execute('select count(*) from "%s"' % t).fetchone()[0]
+    total += f.execute('select count(*) from %s' % quote(t)).fetchone()[0]
     null_ok = null_ok and not f.execute(
-        'select count(*) from "%s" where target is null or name is null or author'
-        ' is null or tags is null or cover_path is null or time is null' % t).fetchone()[0]
-    for ty, n in f.execute('select type, count(*) from "%s" group by type' % t):
+        'select count(*) from %s where target is null or name is null or author'
+        ' is null or tags is null or cover_path is null or time is null' % quote(t)).fetchone()[0]
+    for ty, n in f.execute('select type, count(*) from %s group by type' % quote(t)):
         ftypes[ty] = ftypes.get(ty, 0) + n
 check('every folder table has the PicaComic column layout', layout_ok)
 check('no nulls in folder columns that are cast on read', null_ok)

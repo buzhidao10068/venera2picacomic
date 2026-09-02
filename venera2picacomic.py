@@ -15,6 +15,14 @@ identical:
 """
 import json, os, shutil, sqlite3, sys, tempfile, zipfile
 
+# Folder names come from the user's library and can hold emoji; a Windows
+# console defaults to a legacy codepage that cannot encode them, and the
+# summary print at the bottom would die *after* a perfectly good file was
+# already written. Degrade those characters instead.
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(errors='replace')
+
 # Venera sourceKey.hashCode -> PicaComic built-in type value.
 # HistoryType and FavoriteType agree up to htmanga and then diverge:
 # FavoriteType resolves through `ComicType.values[key]`, whose index 5 is

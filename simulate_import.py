@@ -12,15 +12,27 @@ its source is dereferenced fails here instead of in the app.
 """
 import json, os, sqlite3, sys, tempfile, zipfile
 
+# same reason as verify.py: an emoji in a folder name must not crash the report
+for _s in (sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(errors='replace')
+
 COMIC_TYPE = ['picacg', 'ehentai', 'jm', 'hitomi', 'htManga', 'htFavorite',
               'nhentai', 'other']
 BUILT_IN = {'picacg', 'ehentai', 'jm', 'hitomi', 'htmanga', 'nhentai'}
 HISTORY_NAMES = ['picacg', 'ehentai', 'jm', 'hitomi', 'htmanga', 'nhentai']
 
-FOLDER_DDL = ('create table "%s"(target text, name TEXT, author TEXT, type int,'
+FOLDER_DDL = ('create table %s(target text, name TEXT, author TEXT, type int,'
               ' tags TEXT, cover_path TEXT, time TEXT, last_update_time TEXT'
               ' DEFAULT NULL, has_new_update INTEGER DEFAULT 0, last_check_time'
               ' INTEGER DEFAULT NULL, display_order int, primary key (target, type))')
+
+
+def quote(name):
+    """Folder names become table names verbatim, and PicaComic's createFolder
+    only rejects empty and duplicate names -- so a name may contain a quote."""
+    return '"' + name.replace('"', '""') + '"'
+
 
 tmp = tempfile.mkdtemp()
 zipfile.ZipFile(sys.argv[1]).extractall(tmp)
@@ -63,7 +75,7 @@ for folder in folders:
 folders.sort(key=lambda name: order[name])
 items = []
 for folder in folders:
-    for row in src.execute('select * from "%s";' % folder):
+    for row in src.execute('select * from %s;' % quote(folder)):
         items.append({'folder': folder, 'target': row['target'],
                       'name': str(row['name']), 'author': str(row['author']),
                       'type': int(row['type']),
@@ -85,15 +97,15 @@ for it in items:
         js_rows += 1
     if it['folder'] not in created:
         assert it['folder'] != '', 'createFolder throws on an empty folder name'
-        dest.execute(FOLDER_DDL % it['folder'])
+        dest.execute(FOLDER_DDL % quote(it['folder']))
         created.append(it['folder'])
-    if dest.execute('select * from "%s" where target == ? and type == ?'
-                    % it['folder'], (it['target'], key)).fetchall():
+    if dest.execute('select * from %s where target == ? and type == ?'
+                    % quote(it['folder']), (it['target'], key)).fetchall():
         skips += 1
         continue
-    mx = dest.execute('select max(display_order) from "%s"' % it['folder']).fetchone()[0]
-    dest.execute('insert into "%s" (target, name, author, type, tags, cover_path,'
-                 ' time, display_order) values (?,?,?,?,?,?,?,?)' % it['folder'],
+    mx = dest.execute('select max(display_order) from %s' % quote(it['folder'])).fetchone()[0]
+    dest.execute('insert into %s (target, name, author, type, tags, cover_path,'
+                 ' time, display_order) values (?,?,?,?,?,?,?,?)' % quote(it['folder']),
                  (it['target'], it['name'], it['author'], key, ','.join(it['tags']),
                   it['coverPath'], it['time'], (mx or 0) + 1))
     added += 1
